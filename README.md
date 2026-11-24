@@ -9,7 +9,6 @@
 ## 启动程序
 
 - **安装向导版**。下载 `TubeGet-Setup.exe` 后双击安装。安装向导会把主程序和组件装入所选目录。安装后可从开始菜单启动，也可在 Windows 的「已安装的应用」中卸载。
-- **旧版便携文件**。单文件 EXE 和便携 ZIP 可在 [2026.11.25.1 发布页](https://github.com/Jugui-Lin/TubeGet/releases/tag/v2026.11.25.1) 下载。
 
 各版本共用设置和任务历史，存放在 `%LOCALAPPDATA%\TubeGetDesktop`。如果手上只有 GitHub 源码，请先按[构建说明](#构建)准备组件并编译。
 
