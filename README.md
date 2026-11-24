@@ -2,15 +2,14 @@
 
 适用于 64 位 Windows 10 和 11。TubeGet 可以解析作品链接、批量下载、管理已完成的文件，以及转换本地媒体。
 
-[下载 Windows 版](https://github.com/Jugui-Lin/TubeGet/releases/latest)
+[下载 Windows 安装包](https://github.com/Jugui-Lin/TubeGet/releases/latest/download/TubeGet-Setup.exe)
 
 [启动程序](#启动程序) · [解析与下载](#解析与下载) · [查看已完成文件](#查看已完成文件) · [媒体转换](#媒体转换) · [站点登录](#站点登录) · [常见问题](#常见问题) · [程序更新](#程序更新) · [构建](#构建)
 
 ## 启动程序
 
 - **安装向导版**。下载 `TubeGet-Setup.exe` 后双击安装。安装向导会把主程序和组件装入所选目录。安装后可从开始菜单启动，也可在 Windows 的「已安装的应用」中卸载。
-- **单文件版**。下载 `TubeGet.exe` 后双击运行。首次启动会解包组件，并清理已停用的旧版解包缓存。
-- **便携目录版**。完整解压 Windows ZIP，再双击目录中的 `TubeGet.exe`。移动或备份时请复制整个目录，让主程序能找到同级的 `components`。
+- **旧版便携文件**。单文件 EXE 和便携 ZIP 可在 [2026.11.25.1 发布页](https://github.com/Jugui-Lin/TubeGet/releases/tag/v2026.11.25.1) 下载。
 
 各版本共用设置和任务历史，存放在 `%LOCALAPPDATA%\TubeGetDesktop`。如果手上只有 GitHub 源码，请先按[构建说明](#构建)准备组件并编译。
 
