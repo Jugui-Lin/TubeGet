@@ -8,7 +8,7 @@
 
 ## 启动程序
 
-- **安装向导版**。下载 `TubeGet-Setup.exe` 后双击安装。安装完成后可从开始菜单启动，也可以在 Windows 的「已安装的应用」中卸载。
+- **安装向导版**。下载 `TubeGet-Setup.exe` 后双击安装。安装向导会把主程序和组件装入所选目录。安装后可从开始菜单启动，也可在 Windows 的「已安装的应用」中卸载。
 - **单文件版**。下载 `TubeGet.exe` 后双击运行。首次启动会解包组件，并清理已停用的旧版解包缓存。
 - **便携目录版**。完整解压 Windows ZIP，再双击目录中的 `TubeGet.exe`。移动或备份时请复制整个目录，让主程序能找到同级的 `components`。
 
@@ -88,6 +88,6 @@
 
 按[第三方组件清单](Windows/components/第三方组件.md)准备各组件，将 x64 WebView2 SDK 的 Core、WinForms 和 Loader DLL 放到 `Windows/` 目录。运行 `Windows/源码/build.ps1` 编译，再运行 `Windows/源码/build-single.ps1` 打包。
 
-制作带安装向导的 `TubeGet-Setup.exe` 时，运行 `Windows/源码/build-installer.ps1`。用 `-Launcher` 指定上一步生成的单文件版，用 `-Compiler` 指定 Inno Setup 的 `ISCC.exe`，可用 `-OutputDirectory` 指定输出位置。如果编译器的 `Languages` 目录里缺少 `ChineseSimplified.isl`，可从 [Inno Setup 官方翻译页面](https://jrsoftware.org/inno-setup/translations)下载简体中文文件。
+制作带安装向导的 `TubeGet-Setup.exe` 时，运行 `Windows/源码/build-installer.ps1`。用 `-ProgramDirectory` 指定编译后的 `Windows` 程序目录，用 `-Compiler` 指定 Inno Setup 的 `ISCC.exe`，可用 `-OutputDirectory` 指定输出位置。如果编译器的 `Languages` 目录里缺少 `ChineseSimplified.isl`，可从 [Inno Setup 官方翻译页面](https://jrsoftware.org/inno-setup/translations)下载简体中文文件。
 
 [浏览 Windows 源码](Windows/源码)

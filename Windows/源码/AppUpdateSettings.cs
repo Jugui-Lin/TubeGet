@@ -22,7 +22,8 @@ namespace TubeGet
             try
             {
                 IWebProxy proxy = ComponentUpdater.GetProxy(options.Proxy);
-                var update = await Task.Run(() => AppUpdater.Check(proxy, new Version(ReleaseInfo.Version)));
+                bool installed = AppUpdater.IsInstalled(Application.ExecutablePath);
+                var update = await Task.Run(() => AppUpdater.Check(proxy, new Version(ReleaseInfo.Version), installed));
                 if (IsDisposed || quitting) return;
                 if (update == null)
                 {
@@ -54,7 +55,7 @@ namespace TubeGet
                     MessageBox.Show(this, "请等待当前任务结束后再安装更新。", "程序更新");
                     return;
                 }
-                LaunchAppUpdate(package);
+                LaunchAppUpdate(package, update.UsesInstaller);
             }
             catch (Exception ex)
             {
@@ -65,11 +66,11 @@ namespace TubeGet
             finally { appUpdateRunning = false; }
         }
 
-        private void LaunchAppUpdate(string package)
+        private void LaunchAppUpdate(string package, bool useInstaller)
         {
             string executable = Application.ExecutablePath;
             string cached = Path.Combine(Engine.Data, "packages") + Path.DirectorySeparatorChar;
-            if (executable.StartsWith(cached, StringComparison.OrdinalIgnoreCase))
+            if (!useInstaller && executable.StartsWith(cached, StringComparison.OrdinalIgnoreCase))
             {
                 executable = Environment.GetEnvironmentVariable("TUBEGET_LAUNCHER_PATH");
                 if (String.IsNullOrEmpty(executable) || !Path.IsPathRooted(executable) || !File.Exists(executable))
@@ -81,12 +82,15 @@ namespace TubeGet
                 dirty = false;
             }
             using (var current = Process.GetCurrentProcess())
-            using (var installer = Process.Start(new ProcessStartInfo(package,
-                "--install-app-update \"" + executable + "\" " + current.Id) { UseShellExecute = false }))
             {
-                if (installer == null) throw new IOException("无法启动 TubeGet 更新程序。");
-                quitting = true;
-                Close();
+                string arguments = useInstaller ? "/VERYSILENT /NORESTART /TubeGetUpdatePID=" + current.Id :
+                    "--install-app-update \"" + executable + "\" " + current.Id;
+                using (var installer = Process.Start(new ProcessStartInfo(package, arguments) { UseShellExecute = false }))
+                {
+                    if (installer == null) throw new IOException("无法启动 TubeGet 更新程序。");
+                    quitting = true;
+                    Close();
+                }
             }
         }
     }
