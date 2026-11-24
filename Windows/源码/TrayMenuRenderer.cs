@@ -4,8 +4,12 @@ using System.Windows.Forms;
 
 namespace TubeGet
 {
-    internal sealed class TrayMenuRenderer : ToolStripRenderer
+    internal sealed class MaterialPopupRenderer : ToolStripRenderer
     {
+        private readonly bool rounded;
+
+        internal MaterialPopupRenderer(bool rounded = false) { this.rounded = rounded; }
+
         protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
         {
             e.Graphics.Clear(Material.Card);
@@ -14,7 +18,15 @@ namespace TubeGet
         protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
         {
             using (var pen = new Pen(Material.Line))
-                e.Graphics.DrawRectangle(pen, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
+            {
+                var bounds = new Rectangle(0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
+                if (!rounded) e.Graphics.DrawRectangle(pen, bounds);
+                else
+                {
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    using (var outline = Material.Shape(bounds, MainForm.Ui(12))) e.Graphics.DrawPath(pen, outline);
+                }
+            }
         }
 
         protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
@@ -62,8 +74,12 @@ namespace TubeGet
             }
             else Material.Icon(e.Graphics, glyph, icon, color);
             int textLeft = MainForm.Ui(37);
+            var menuItem = e.Item as ToolStripMenuItem;
+            bool isChecked = menuItem != null && menuItem.Checked;
+            if (isChecked)
+                Material.Icon(e.Graphics, "done", new Rectangle(e.Item.Width - MainForm.Ui(27), icon.Y, iconSize, iconSize), color);
             TextRenderer.DrawText(e.Graphics, e.Text, e.TextFont,
-                new Rectangle(textLeft, 0, e.Item.Width - textLeft - MainForm.Ui(8), e.Item.Height),
+                new Rectangle(textLeft, 0, e.Item.Width - textLeft - MainForm.Ui(isChecked ? 34 : 8), e.Item.Height),
                 color, TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
                 TextFormatFlags.NoPadding | TextFormatFlags.PreserveGraphicsClipping);
         }

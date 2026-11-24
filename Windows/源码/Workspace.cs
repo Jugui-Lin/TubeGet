@@ -153,7 +153,7 @@ namespace TubeGet
             var more = ButtonOf("", 38, null, "更多选项", "more", ButtonStyle.Quiet);
             int logicalWidth = layoutScaled ? (int)Math.Round(heroActions.Width / UiScale) : heroActions.Width;
             more.Location = new Point(logicalWidth - 38, 19);
-            Attach(more, MainMenu);
+            Attach(more, MainMenu, alignRight: true);
             heroActions.Controls.Add(more);
             var theme = ButtonOf("", 39, ToggleTheme, "切换浅色／深色", "theme", ButtonStyle.Tonal);
             theme.Location = new Point(more.Left - 44, 19);

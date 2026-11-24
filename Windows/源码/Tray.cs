@@ -22,7 +22,7 @@ namespace TubeGet
                 BackColor = Material.Card, ForeColor = Material.Ink, Font = UiFont(10),
                 ShowImageMargin = false, Padding = new Padding(Ui(6)),
                 MinimumSize = new Size(Ui(224), 0),
-                Renderer = new TrayMenuRenderer()
+                Renderer = new MaterialPopupRenderer()
             };
             summary.AutoSize = false;
             summary.Size = new Size(Ui(212), Ui(38));

@@ -642,24 +642,50 @@ namespace TubeGet
             return menu;
         }
 
-        private void Attach(Button button, Func<ContextMenuStrip> build)
+        private void Attach(Button button, Func<ContextMenuStrip> build, bool alignRight = false)
         {
-            button.Click += (s, e) => ShowMenu(build(), button, new Point(0, button.Height));
+            button.Click += (s, e) => ShowMenu(build(), button,
+                new Point(alignRight ? button.Width : 0, button.Height + (alignRight ? Ui(4) : 0)),
+                alignRight ? ToolStripDropDownDirection.BelowLeft : ToolStripDropDownDirection.Default);
         }
 
-        private void ShowMenu(ContextMenuStrip menu, Control parent, Point location)
+        private void ShowMenu(ContextMenuStrip menu, Control parent, Point location,
+            ToolStripDropDownDirection direction = ToolStripDropDownDirection.Default)
         {
             menu.Closed += (s, e) => BeginInvoke(new Action(menu.Dispose));
-            menu.Show(parent, location);
+            if (direction == ToolStripDropDownDirection.Default) menu.Show(parent, location);
+            else menu.Show(parent, location, direction);
         }
 
         private ContextMenuStrip MainMenu()
         {
-            var pinned = Item("窗口置顶", () => TopMost = !TopMost); pinned.Checked = TopMost;
-            return BuildMenu(Item("参数设置", () => Settings(0)), Item("设置 Cookies", () => Settings(2)), pinned,
-                Item("最小化到托盘", HideToTray), Item("数据文件夹", () => OpenFolder(Engine.Data)), Item("导出任务", ExportTasks), Item("导入任务", ImportTasks),
-                Item("支持的站点", SupportedSites), Item("检查程序更新", () => CheckAppUpdate(false)), Item("关于 TubeGet", () => MessageBox.Show(this,
-                    "TubeGet " + ReleaseInfo.Version + "\nWindows 视频下载与转换工具\n内置 yt-dlp、FFmpeg、aria2 和 QuickJS", "关于")));
+            var pinned = TrayItem("窗口置顶", "window", () => TopMost = !TopMost);
+            pinned.Checked = TopMost;
+            var font = UiFont(10);
+            var menu = new ContextMenuStrip {
+                BackColor = Material.Card, ForeColor = Material.Ink, Font = font,
+                ShowImageMargin = false, ShowCheckMargin = false, Padding = new Padding(Ui(6)),
+                MinimumSize = new Size(Ui(224), 0), Renderer = new MaterialPopupRenderer(rounded: true),
+                DropShadowEnabled = false
+            };
+            menu.Disposed += (s, e) => font.Dispose();
+            menu.SizeChanged += (s, e) =>
+            {
+                if (menu.Width < 2 || menu.Height < 2) return;
+                var previous = menu.Region;
+                using (var outline = Material.Shape(menu.ClientRectangle, Ui(12))) menu.Region = new Region(outline);
+                if (previous != null) previous.Dispose();
+            };
+            menu.Items.AddRange(new ToolStripItem[] {
+                TrayItem("参数设置", "settings", () => Settings(0)), TrayItem("设置 Cookies", "clipboard", () => Settings(2)), pinned,
+                TrayItem("最小化到托盘", "download", HideToTray), new ToolStripSeparator(),
+                TrayItem("数据文件夹", "folder", () => OpenFolder(Engine.Data)), TrayItem("导出任务", "back", ExportTasks),
+                TrayItem("导入任务", "plus", ImportTasks), new ToolStripSeparator(),
+                TrayItem("支持的站点", "queue", SupportedSites), TrayItem("检查程序更新", "convert", () => CheckAppUpdate(false)),
+                TrayItem("关于 TubeGet", "done", () => MessageBox.Show(this,
+                    "TubeGet " + ReleaseInfo.Version + "\nWindows 视频下载与转换工具\n内置 yt-dlp、FFmpeg、aria2 和 QuickJS", "关于"))
+            });
+            return menu;
         }
 
         private void SetPage(int index, bool reloadActions = false)
