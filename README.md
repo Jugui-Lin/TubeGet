@@ -8,10 +8,11 @@
 
 ## 启动程序
 
+- **安装向导版**。下载 `TubeGet-Setup.exe` 后双击安装。安装完成后可从开始菜单启动，也可以在 Windows 的「已安装的应用」中卸载。
 - **单文件版**。下载 `TubeGet.exe` 后双击运行。首次启动会解包组件，并清理已停用的旧版解包缓存。
 - **便携目录版**。完整解压 Windows ZIP，再双击目录中的 `TubeGet.exe`。移动或备份时请复制整个目录，让主程序能找到同级的 `components`。
 
-两种版本共用设置和任务历史，存放在 `%LOCALAPPDATA%\TubeGetDesktop`。如果手上只有 GitHub 源码，请先按[构建说明](#构建)准备组件并编译。
+各版本共用设置和任务历史，存放在 `%LOCALAPPDATA%\TubeGetDesktop`。如果手上只有 GitHub 源码，请先按[构建说明](#构建)准备组件并编译。
 
 ## 解析与下载
 
