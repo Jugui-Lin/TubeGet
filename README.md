@@ -2,7 +2,7 @@
 
 TubeGet 是一款 Windows 应用，用于解析视频链接、管理下载队列和转换媒体文件。
 
-[WinForms 源码](Windows/源码) · [使用说明](Windows/使用说明.md)
+[Windows 图文使用指南](Windows/使用说明.md) · [WinForms 源码](Windows/源码)
 
 ## 构建
 
