@@ -31,7 +31,7 @@ namespace TubeGet
         {
             Version version;
             string tag = release == null ? "" : release.tag_name ?? "";
-            if (!Regex.IsMatch(tag, @"^v[0-9]+\.[0-9]+\.[0-9]+$") || !Version.TryParse(tag.Substring(1), out version))
+            if (!Regex.IsMatch(tag, @"\Av[0-9]+(?:\.[0-9]+){2,3}\z") || !Version.TryParse(tag.Substring(1), out version))
                 throw new InvalidDataException("无法识别 TubeGet 的发布版本。");
             if (version <= current) return null;
             var asset = (release.assets ?? new ComponentUpdater.Asset[0]).FirstOrDefault(file => file != null && file.name == "TubeGet.exe");
