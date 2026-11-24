@@ -215,6 +215,7 @@ namespace TubeGet
             Schedule();
             if (startupUrls.Length > 0)
                 AddUrls(String.Join("\n", startupUrls), "视频", options.Playlist, null, 0);
+            if (options.AutoUpdateApp) CheckAppUpdate(true);
         }
 
         internal void SmokeCheck(string captureDirectory)
@@ -657,7 +658,7 @@ namespace TubeGet
             var pinned = Item("窗口置顶", () => TopMost = !TopMost); pinned.Checked = TopMost;
             return BuildMenu(Item("参数设置", () => Settings(0)), Item("设置 Cookies", () => Settings(2)), pinned,
                 Item("最小化到托盘", HideToTray), Item("数据文件夹", () => OpenFolder(Engine.Data)), Item("导出任务", ExportTasks), Item("导入任务", ImportTasks),
-                Item("支持的站点", SupportedSites), Item("关于 TubeGet", () => MessageBox.Show(this,
+                Item("支持的站点", SupportedSites), Item("检查程序更新", () => CheckAppUpdate(false)), Item("关于 TubeGet", () => MessageBox.Show(this,
                     "TubeGet " + ReleaseInfo.Version + "\nWindows 视频下载与转换工具\n内置 yt-dlp、FFmpeg、aria2 和 QuickJS", "关于")));
         }
 

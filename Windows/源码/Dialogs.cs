@@ -216,6 +216,7 @@ namespace TubeGet
             var resume = general.Check("启动后继续未完成下载", options.Resume);
             var trayMode = general.Check("关闭窗口时最小化到托盘", options.Tray);
             var notify = general.Check("任务完成时显示通知", options.Notify);
+            var autoUpdateApp = general.Check("启动时自动检查并下载程序更新", options.AutoUpdateApp);
             var updates = new PreferenceCard("GitHub 组件更新");
             var autoUpdate = ConfigureComponentUpdates(updates, () => proxy.Text.Trim());
             var ai = new PreferenceCard("AI 链接修复");
@@ -253,6 +254,7 @@ namespace TubeGet
                         Theme = ThemeModes[Array.IndexOf(ThemeLabels, theme.Text)], Transcode = options.Transcode,
                         CompletedCards = options.CompletedCards, CompletedFolderCards = options.CompletedFolderCards,
                         AutoUpdateComponents = autoUpdate.Checked,
+                        AutoUpdateApp = autoUpdateApp.Checked,
                         AiRepair = readAiRepair()
                     };
                     Engine.Save("settings.json", next);

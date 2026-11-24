@@ -157,7 +157,12 @@ namespace TubeGet
 
         internal static Release Fetch(Component component, IWebProxy proxy)
         {
-            var uri = new Uri("https://api.github.com/repos/" + component.Repository + "/releases/latest");
+            return FetchRelease(component.Repository, proxy);
+        }
+
+        internal static Release FetchRelease(string repository, IWebProxy proxy)
+        {
+            var uri = new Uri("https://api.github.com/repos/" + repository + "/releases/latest");
             using (var response = Request(uri, proxy, true))
             using (var input = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
             {
@@ -231,7 +236,7 @@ namespace TubeGet
             return match.Success && Int32.TryParse(match.Groups[1].Value, out number) ? number : 0;
         }
 
-        private static HttpWebResponse Request(Uri uri, IWebProxy proxy, bool metadata)
+        internal static HttpWebResponse Request(Uri uri, IWebProxy proxy, bool metadata)
         {
             // Legacy .NET Framework executables may default to TLS 1.0 instead of system settings.
             if (ServicePointManager.SecurityProtocol != 0)
@@ -262,7 +267,7 @@ namespace TubeGet
             throw new InvalidDataException("GitHub 更新地址重定向次数过多。");
         }
 
-        private static void CopyAsset(Stream input, Stream output, long expected)
+        internal static void CopyAsset(Stream input, Stream output, long expected)
         {
             var buffer = new byte[128 * 1024];
             long total = 0;
@@ -276,7 +281,7 @@ namespace TubeGet
             if (total != expected) throw new InvalidDataException("下载文件不完整。");
         }
 
-        private static void VerifyDigest(string path, string digest)
+        internal static void VerifyDigest(string path, string digest)
         {
             if (String.IsNullOrEmpty(digest)) return;
             using (var sha = SHA256.Create())

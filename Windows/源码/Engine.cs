@@ -47,6 +47,7 @@ namespace TubeGet
         public bool CompletedCards { get; set; }
         public bool CompletedFolderCards { get; set; }
         public bool AutoUpdateComponents { get; set; }
+        public bool AutoUpdateApp { get; set; }
         public AiRepairSettings AiRepair { get; set; }
 
         public Options()

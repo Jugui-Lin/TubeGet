@@ -13,6 +13,7 @@ if (!(Test-Path -LiteralPath $compiler)) {
 }
 $appIcon = Join-Path $PSScriptRoot 'TubeGet.ico'
 $launcher = Join-Path $PSScriptRoot '打包/BundleLauncher.cs'
+$updater = Join-Path $PSScriptRoot '打包/AppUpdateInstall.cs'
 $activation = Join-Path $PSScriptRoot 'WindowActivation.cs'
 $versionInfo = Join-Path $PSScriptRoot 'VersionInfo.cs'
 $payload = [IO.Path]::GetTempFileName()
@@ -37,7 +38,7 @@ try {
     finally { $stream.Dispose() }
 
     $digest = (Get-FileHash -LiteralPath $payload -Algorithm SHA256).Hash.ToLowerInvariant()
-    & $compiler /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 "/out:$launcherExe" "/win32icon:$appIcon" "/win32manifest:$PSScriptRoot/TubeGet.manifest" "/resource:$payload,TubeGet.Bundle.$digest" /reference:System.Windows.Forms.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll $launcher $activation $versionInfo
+    & $compiler /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 "/out:$launcherExe" "/win32icon:$appIcon" "/win32manifest:$PSScriptRoot/TubeGet.manifest" "/resource:$payload,TubeGet.Bundle.$digest" /reference:System.Windows.Forms.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll $launcher $updater $activation $versionInfo
     if ($LASTEXITCODE -ne 0) { throw "Standalone build failed ($LASTEXITCODE)" }
     Copy-Item -LiteralPath $launcherExe -Destination $OutputPath -Force
     Write-Output "Bundle SHA-256 $digest"

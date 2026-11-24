@@ -24,9 +24,14 @@ namespace TubeGet
         {
             try
             {
+                var assembly = typeof(BundleLauncher).Assembly;
+                if (args.Length == 3 && args[0] == AppUpdateInstall.InstallCommand)
+                {
+                    AppUpdateInstall.Apply(assembly.Location, args[1], args[2]);
+                    return 0;
+                }
                 if (args.Length == 0 && WindowActivation.Request()) return 0;
 
-                var assembly = typeof(BundleLauncher).Assembly;
                 string resource = assembly.GetManifestResourceNames().Single(name => name.StartsWith(ResourcePrefix, StringComparison.Ordinal));
                 string releaseId = resource.Substring(ResourcePrefix.Length);
                 string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TubeGetDesktop", "packages");
@@ -38,6 +43,7 @@ namespace TubeGet
                     Arguments = String.Join(" ", args.Select(QuoteArgument)),
                     UseShellExecute = false
                 };
+                start.EnvironmentVariables[AppUpdateInstall.LauncherVariable] = assembly.Location;
                 using (var app = Process.Start(start))
                 {
                     if (app == null) throw new InvalidOperationException("无法启动 TubeGet。");
