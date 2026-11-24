@@ -33,15 +33,17 @@ namespace TubeGet
         {
             if (!e.Item.Enabled || !e.Item.Selected) return;
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            Material.Fill(e.Graphics, new Rectangle(1, 1, e.Item.Width - 2, e.Item.Height - 2),
-                MainForm.Ui(8), Material.Accent);
+            Rectangle bounds = rounded ? InsetRow(e.Item) : new Rectangle(1, 1, e.Item.Width - 2, e.Item.Height - 2);
+            if (bounds.Width > 0 && bounds.Height > 0)
+                Material.Fill(e.Graphics, bounds, MainForm.Ui(8), Material.Accent);
         }
 
         protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
         {
             int y = e.Item.Height / 2;
+            var bounds = rounded ? InsetRow(e.Item) : Rectangle.Inflate(new Rectangle(Point.Empty, e.Item.Size), -MainForm.Ui(9), 0);
             using (var pen = new Pen(Material.Line))
-                e.Graphics.DrawLine(pen, MainForm.Ui(9), y, e.Item.Width - MainForm.Ui(9), y);
+                e.Graphics.DrawLine(pen, bounds.Left, y, bounds.Right - (rounded ? 1 : 0), y);
         }
 
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
@@ -51,7 +53,9 @@ namespace TubeGet
             Color color = summary || !e.Item.Enabled ? Material.Muted :
                 e.Item.Selected ? Material.OnAccent : Material.Ink;
             int iconSize = MainForm.Ui(16);
-            var icon = new Rectangle(MainForm.Ui(11), (e.Item.Height - iconSize) / 2, iconSize, iconSize);
+            var row = rounded ? InsetRow(e.Item) : new Rectangle(Point.Empty, e.Item.Size);
+            var icon = new Rectangle(row.Left + MainForm.Ui(rounded ? 9 : 11),
+                row.Top + (row.Height - iconSize) / 2, iconSize, iconSize);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             if (summary)
             {
@@ -73,15 +77,26 @@ namespace TubeGet
                 }
             }
             else Material.Icon(e.Graphics, glyph, icon, color);
-            int textLeft = MainForm.Ui(37);
+            int textLeft = row.Left + MainForm.Ui(rounded ? 35 : 37);
             var menuItem = e.Item as ToolStripMenuItem;
             bool isChecked = menuItem != null && menuItem.Checked;
             if (isChecked)
-                Material.Icon(e.Graphics, "done", new Rectangle(e.Item.Width - MainForm.Ui(27), icon.Y, iconSize, iconSize), color);
+                Material.Icon(e.Graphics, "done", new Rectangle(row.Right - MainForm.Ui(27), icon.Y, iconSize, iconSize), color);
             TextRenderer.DrawText(e.Graphics, e.Text, e.TextFont,
-                new Rectangle(textLeft, 0, e.Item.Width - textLeft - MainForm.Ui(isChecked ? 34 : 8), e.Item.Height),
+                new Rectangle(textLeft, row.Top, row.Right - textLeft - MainForm.Ui(isChecked ? 34 : 8), row.Height),
                 color, TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
                 TextFormatFlags.NoPadding | TextFormatFlags.PreserveGraphicsClipping);
+        }
+
+        // WinForms can leave extra width after the fixed-size items. Measure from the popup edges.
+        private static Rectangle InsetRow(ToolStripItem item)
+        {
+            var bounds = item.Bounds;
+            var owner = item.Owner;
+            int side = System.Math.Max(MainForm.Ui(12), System.Math.Max(bounds.Left, owner.ClientSize.Width - bounds.Right));
+            int top = System.Math.Max(MainForm.Ui(2), MainForm.Ui(8) - bounds.Top);
+            int bottom = System.Math.Min(bounds.Height - MainForm.Ui(2), owner.ClientSize.Height - MainForm.Ui(8) - bounds.Top);
+            return Rectangle.FromLTRB(side - bounds.Left, top, owner.ClientSize.Width - side - bounds.Left, bottom);
         }
     }
 }
