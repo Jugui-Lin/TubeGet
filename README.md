@@ -87,4 +87,6 @@
 
 按[第三方组件清单](Windows/components/第三方组件.md)准备各组件，将 x64 WebView2 SDK 的 Core、WinForms 和 Loader DLL 放到 `Windows/` 目录。运行 `Windows/源码/build.ps1` 编译，再运行 `Windows/源码/build-single.ps1` 打包。
 
+制作带安装向导的 `TubeGet-Setup.exe` 时，运行 `Windows/源码/build-installer.ps1`。用 `-Launcher` 指定上一步生成的单文件版，用 `-Compiler` 指定 Inno Setup 的 `ISCC.exe`，可用 `-OutputDirectory` 指定输出位置。如果编译器的 `Languages` 目录里缺少 `ChineseSimplified.isl`，可从 [Inno Setup 官方翻译页面](https://jrsoftware.org/inno-setup/translations)下载简体中文文件。
+
 [浏览 Windows 源码](Windows/源码)
