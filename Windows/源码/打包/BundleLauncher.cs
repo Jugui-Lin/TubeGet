@@ -1,10 +1,13 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -36,18 +39,16 @@ namespace TubeGet
                 string releaseId = resource.Substring(ResourcePrefix.Length);
                 string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TubeGetDesktop", "packages");
                 string folder = Path.Combine(root, releaseId);
-                EnsureExtracted(assembly, resource, root, folder, releaseId);
-
                 var start = new ProcessStartInfo(Path.Combine(folder, "TubeGet.exe")) {
                     WorkingDirectory = folder,
                     Arguments = String.Join(" ", args.Select(QuoteArgument)),
                     UseShellExecute = false
                 };
                 start.EnvironmentVariables[AppUpdateInstall.LauncherVariable] = assembly.Location;
-                using (var app = Process.Start(start))
+                bool testing = args.Length > 0 && (args[0] == "--self-test" || args[0] == "--ui-smoke");
+                using (var app = StartPackage(assembly, resource, root, folder, releaseId, start, testing))
                 {
-                    if (app == null) throw new InvalidOperationException("无法启动 TubeGet。");
-                    if (args.Length == 0 || (args[0] != "--self-test" && args[0] != "--ui-smoke")) return 0;
+                    if (!testing) return 0;
                     app.WaitForExit();
                     return app.ExitCode;
                 }
@@ -58,6 +59,67 @@ namespace TubeGet
                     "TubeGet", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;
             }
+        }
+
+        private static Process StartPackage(Assembly assembly, string resource, string root, string folder,
+            string releaseId, ProcessStartInfo start, bool testing)
+        {
+            using (var gate = new Mutex(false, @"Local\TubeGet.Bundle.Cache"))
+            {
+                try
+                {
+                    if (!gate.WaitOne(TimeSpan.FromSeconds(60)))
+                        throw new TimeoutException("另一个 TubeGet 窗口正在准备组件，请稍后重试。");
+                }
+                catch (AbandonedMutexException) { }
+                try
+                {
+                    EnsureExtracted(assembly, resource, root, folder, releaseId);
+                    var app = Process.Start(start);
+                    if (app == null) throw new InvalidOperationException("无法启动 TubeGet。");
+                    if (!testing) PrunePackages(root, folder);
+                    return app;
+                }
+                finally { gate.ReleaseMutex(); }
+            }
+        }
+
+        internal static void PrunePackages(string root, string current)
+        {
+            try
+            {
+                var cache = new DirectoryInfo(root);
+                if ((cache.Attributes & FileAttributes.ReparsePoint) != 0) return;
+                var inUse = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Path.GetFullPath(current) };
+                string prefix = cache.FullName.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                foreach (string program in RequiredFiles.Where(name => name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                    .Select(Path.GetFileNameWithoutExtension))
+                {
+                    foreach (var process in Process.GetProcessesByName(program))
+                    using (process)
+                    {
+                        string executable;
+                        try { executable = process.MainModule.FileName; }
+                        catch (InvalidOperationException) { continue; }
+                        catch (Win32Exception) { return; }
+                        if (!executable.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                        int end = executable.IndexOf(Path.DirectorySeparatorChar, prefix.Length);
+                        if (end >= 0) inUse.Add(executable.Substring(0, end));
+                    }
+                }
+
+                DateTime cutoff = DateTime.UtcNow.AddDays(-1);
+                foreach (var candidate in cache.EnumerateDirectories())
+                {
+                    if (inUse.Contains(candidate.FullName) || (candidate.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                    bool oldPackage = Regex.IsMatch(candidate.Name, @"\A[0-9a-f]{64}\z") && IsReady(candidate.FullName);
+                    bool abandoned = Regex.IsMatch(candidate.Name, @"\A(?:extract|incomplete)-[0-9a-f]{32}\z") &&
+                        candidate.LastWriteTimeUtc <= cutoff;
+                    if (oldPackage || abandoned) TryRemoveStaging(cache.FullName, candidate.FullName);
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
 
         private static bool IsReady(string folder)
@@ -118,9 +180,25 @@ namespace TubeGet
         {
             if (path == null || !String.Equals(Path.GetDirectoryName(Path.GetFullPath(path)), Path.GetFullPath(root),
                 StringComparison.OrdinalIgnoreCase)) return;
-            try { if (Directory.Exists(path)) Directory.Delete(path, true); }
+            try
+            {
+                if (Directory.Exists(path) && !ContainsReparsePoint(new DirectoryInfo(path)))
+                    Directory.Delete(path, true);
+            }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
+        }
+
+        private static bool ContainsReparsePoint(DirectoryInfo directory)
+        {
+            if ((directory.Attributes & FileAttributes.ReparsePoint) != 0) return true;
+            foreach (var entry in directory.EnumerateFileSystemInfos())
+            {
+                if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) return true;
+                var subdirectory = entry as DirectoryInfo;
+                if (subdirectory != null && ContainsReparsePoint(subdirectory)) return true;
+            }
+            return false;
         }
 
         private static string QuoteArgument(string argument)
