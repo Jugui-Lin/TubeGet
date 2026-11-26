@@ -251,6 +251,8 @@ namespace TubeGet
                     }
                     if (sidecars) continue;
                     var entry = new Entry { Format = id, HasVideo = !audioOnly, NeedsAudio = !audioOnly && audio == "none" };
+                    Int32.TryParse(Engine.Value(format, "width"), out entry.Width);
+                    Int32.TryParse(Engine.Value(format, "height"), out entry.Height);
                     string fps = Engine.Value(format, "fps");
                     string name = audioOnly ? "仅音频" : QualityLabel(format, resolution.Length == 0 ? container : resolution);
                     string audioLabel = audioOnly ? container.ToUpperInvariant() :
@@ -397,7 +399,9 @@ namespace TubeGet
                 var selected = choices.SelectedItems.Count == 0 ? null : choices.SelectedItems[0].Tag as Entry;
                 if (selected == null) return;
                 string audio = audioIds[audioPicker.SelectedIndex];
-                string format = selected.NeedsAudio ? selected.Format + (audio == null ? "+ba/" + selected.Format : "+" + audio) : selected.Format;
+                string video = Engine.IsXinpianchang(analyzedUrl) && selected.HasVideo
+                    ? Engine.ConstrainFormatDimensions(selected.Format, selected.Width, selected.Height) : selected.Format;
+                string format = selected.NeedsAudio ? video + (audio == null ? "+ba/" + video : "+" + audio) : video;
                 ReportQueued(AddUrls(analyzedUrl, selected.HasVideo ? "视频" : "音频", false, format, 0, false, plan, folder, resultPassword));
             }
             catch (Exception ex) { choiceStatus.Text = SafeComposerError(ex); }

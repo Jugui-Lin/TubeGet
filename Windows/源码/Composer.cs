@@ -56,6 +56,7 @@ namespace TubeGet
         {
             internal string Url, Title, Format, FormatDetail, Thumbnail;
             internal bool HasVideo, NeedsAudio;
+            internal int Width, Height;
         }
 
         private void OpenComposer(int mode = AutoLink, string input = null)

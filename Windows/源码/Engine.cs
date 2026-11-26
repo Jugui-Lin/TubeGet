@@ -320,11 +320,22 @@ namespace TubeGet
         {
             if (CookieSessions.IsBrowser(options.CookieBrowser)) return null;
             if (options.CookieBrowser == CookieSessions.InApp) return CookieSessions.SavedPath(source);
-            Uri url;
-            if (String.IsNullOrEmpty(options.CookieBrowser) && String.IsNullOrWhiteSpace(options.Cookies) &&
-                Uri.TryCreate(source, UriKind.Absolute, out url) && CookieSessions.Site(url) == "xinpianchang.com")
+            if (String.IsNullOrEmpty(options.CookieBrowser) && String.IsNullOrWhiteSpace(options.Cookies) && IsXinpianchang(source))
                 return CookieSessions.SavedPath(source);
             return options.Cookies;
+        }
+
+        internal static bool IsXinpianchang(string source)
+        {
+            Uri url;
+            return Uri.TryCreate(source, UriKind.Absolute, out url) && CookieSessions.Site(url) == "xinpianchang.com";
+        }
+
+        internal static string ConstrainFormatDimensions(string format, int width, int height)
+        {
+            if (width > 0) format += "[width=" + width.ToString(Invariant) + "]";
+            if (height > 0) format += "[height=" + height.ToString(Invariant) + "]";
+            return format;
         }
 
         internal static string NormalizeBilibiliSpace(string source)
@@ -481,6 +492,8 @@ namespace TubeGet
             string cache = Path.Combine(Data, "partial", job.Id);
             Directory.CreateDirectory(cache);
             string manifest = Path.Combine(cache, "paths.jsonl");
+            bool xinpianchang = IsXinpianchang(job.Source);
+            string transferCache = DownloadTransferCache(cache, xinpianchang);
             bool sidecars = job.Kind == "封面" || job.Kind == "字幕" || job.Kind == "字幕与封面";
             string rendition = !sidecars && (!String.IsNullOrEmpty(job.SelectedFormat) || job.DownloadOptions != null)
                 ? " (%(format_id)s)" : "";
@@ -493,7 +506,7 @@ namespace TubeGet
                 "--progress-template", "postprocess:TP|%(progress.status)s", "--no-simulate",
                 "--print", "before_dl:TT|%(title)s",
                 "--print-to-file", "after_move:%(filepath)j", manifest.Replace("%", "%%"),
-                "-P", "home:" + folder, "-P", "temp:" + cache, "-o", template,
+                "-P", "home:" + folder, "-P", "temp:" + transferCache, "-o", template,
                 job.Playlist ? "--yes-playlist" : "--no-playlist" });
 
             if (job.Kind == "音频")
@@ -517,18 +530,22 @@ namespace TubeGet
                 if (job.Kind == "视频" && o.EmbedSubs) args.Add("--embed-subs");
             }
             if (o.Metadata && (job.Kind == "视频" || job.Kind == "音频")) args.Add("--embed-metadata");
-            if (o.Aria)
+            if (o.Aria && !xinpianchang)
             {
                 string aria = Aria2();
                 args.AddRange(new[] { "--downloader", aria, "--downloader", "dash,m3u8:native" });
                 if (!String.IsNullOrWhiteSpace(o.Rate)) args.AddRange(new[] { "--downloader-args", "aria2c:--max-download-limit=" + o.Rate.Trim() });
             }
+            if (o.Aria && xinpianchang && diagnostics != null)
+                diagnostics("下载方式 · 新片场使用内置下载器处理 Range 和续传");
+            if (transferCache != cache && diagnostics != null)
+                diagnostics("续传 · 旧任务使用分段加速，原生下载将使用独立的临时文件");
             if (sidecars)
                 args.AddRange(new[] { "--print-to-file", "before_dl:%(id)j", Path.Combine(cache, "ids.jsonl").Replace("%", "%%") });
             args.AddRange(new[] { "--", NormalizeBilibiliSpace(job.Source) });
 
             var errors = new List<string>();
-            int exit = await Run(Downloader(), args, token, line =>
+            Action<string> readProgress = line =>
             {
                 if (line.StartsWith("TT|")) title(line.Substring(3));
                 if (line.StartsWith("TP|")) progress(100, 0, PostprocessingDetail);
@@ -539,11 +556,25 @@ namespace TubeGet
                 Double.TryParse(fields[1].Trim().TrimEnd('%'), NumberStyles.Float, Invariant, out percent);
                 Double.TryParse(fields[2], NumberStyles.Float, Invariant, out speed);
                 progress(percent, speed, "进度 " + fields[1].Trim() + "   ·   " + fields[3].Trim() + "   ·   剩余 " + fields[4].Trim());
-            }, line =>
+            };
+            Action<string> readError = line =>
             {
                 KeepError(errors, line);
                 if (diagnostics != null) diagnostics(line);
-            });
+            };
+            string downloader = Downloader();
+            int exit = await Run(downloader, args, token, readProgress, readError);
+            if (exit != 0 && !job.Playlist && !sidecars && errors.Any(IsMediaDownloadForbidden))
+            {
+                token.ThrowIfCancellationRequested();
+                // Re-run extraction from the original work URL, with the same cookie source,
+                // exact selector, output paths and resume files. Signed URLs are never persisted.
+                if (diagnostics != null)
+                    diagnostics("媒体下载返回 403 · 正在从作品页刷新地址并继续原任务（仅重试一次）");
+                progress(0, 0, RefreshingDownloadDetail);
+                errors.Clear();
+                exit = await Run(downloader, args, token, readProgress, readError);
+            }
             if (exit != 0) throw Error(exit, errors);
             var files = new List<string>();
             if (File.Exists(manifest))
@@ -574,6 +605,24 @@ namespace TubeGet
             if (files.Count == 0) throw new InvalidOperationException("组件未生成文件。请检查链接、字幕语言或媒体权限。");
             try { Directory.Delete(cache, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             return files.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        }
+
+        internal const string RefreshingDownloadDetail = "正在刷新临时下载地址…";
+
+        private static bool IsMediaDownloadForbidden(string line)
+        {
+            return Regex.IsMatch(line, @"\bunable to download (?:video|media) data\b.*\b(?:HTTP Error|HTTP status)\s+403\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        internal static string DownloadTransferCache(string taskCache, bool nativeXinpianchang)
+        {
+            // A segmented aria2 file may be sparse. Its length alone is not a native resume offset.
+            if (!nativeXinpianchang) return taskCache;
+            string native = Path.Combine(taskCache, "native");
+            if (!Directory.Exists(native) && !Directory.EnumerateFiles(taskCache, "*.aria2").Any()) return taskCache;
+            Directory.CreateDirectory(native);
+            return native;
         }
 
         internal static async Task<Dictionary<string, object>> Probe(string path, CancellationToken token)

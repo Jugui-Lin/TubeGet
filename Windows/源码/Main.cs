@@ -136,7 +136,7 @@ namespace TubeGet
             }
             conversionFormat = options.ConvertFormat ?? "mp4";
             streamCopy = options.StreamCopy;
-            foreach (var j in jobs.Where(x => new[] { "解析中", "下载中", "处理文件", "转换中", "等待中", "正在暂停" }.Contains(x.State)))
+            foreach (var j in jobs.Where(x => new[] { "解析中", "下载中", "刷新地址", "处理文件", "转换中", "等待中", "正在暂停" }.Contains(x.State)))
             {
                 j.State = !j.Local && options.Resume && !IsPausing(j) ? "等待中" : "已暂停";
                 j.Speed = 0;

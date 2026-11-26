@@ -516,7 +516,7 @@ namespace TubeGet
         {
             if (page == DownloadPage)
             {
-                int downloading = shown.Count(j => j.State == "下载中" || j.State == "解析中" || j.State == "处理文件");
+                int downloading = shown.Count(j => j.State == "下载中" || j.State == "解析中" || j.State == "处理文件" || j.State == "刷新地址");
                 double totalSpeed = shown.Where(j => j.State == "下载中").Sum(j => j.Speed);
                 downloadQueueCount.Text = shown.Length + " 项" + (totalSpeed > 0 ? " · " + SizeText(totalSpeed) + "/s" : "");
                 downloadStatus.Text = downloading + " 项下载中";

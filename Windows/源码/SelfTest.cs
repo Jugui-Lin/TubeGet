@@ -98,6 +98,66 @@ namespace TubeGet
                     if (!Path.GetFileName(exact[0]).Contains("(" + id + ")") || !File.ReadAllBytes(exact[0]).SequenceEqual(content))
                         throw new Exception("指定格式未生成独立的媒体文件。");
                     results.Add("PASS: exact format with distinct output path");
+                    string legacyPart = Path.Combine(root, "legacy-part");
+                    Directory.CreateDirectory(legacyPart);
+                    if (Engine.DownloadTransferCache(legacyPart, true) != legacyPart)
+                        throw new Exception("完整原生续传路径被更改。");
+                    File.WriteAllText(Path.Combine(legacyPart, "sample.mp4.part.aria2"), "fixture");
+                    if (Engine.DownloadTransferCache(legacyPart, true) != Path.Combine(legacyPart, "native") ||
+                        Engine.DownloadTransferCache(legacyPart, false) != legacyPart ||
+                        Engine.ConstrainFormatDimensions("4", 3840, 2160) != "4[width=3840][height=2160]")
+                        throw new Exception("新片场续传路径或画质约束不正确。");
+                    results.Add("PASS: 2160p constraint and isolation of aria2 resume state");
+
+                    var recoveryServer = new TcpListener(IPAddress.Loopback, 0);
+                    recoveryServer.Start();
+                    try
+                    {
+                        string local = "http://127.0.0.1:" + ((IPEndPoint)recoveryServer.LocalEndpoint).Port;
+                        int pages = 0, rejected = 0, resumedAt = 0;
+                        var recoveryServe = ServeFiles(recoveryServer,
+                            new Dictionary<string, byte[]> { { "/fresh.mp4", content } }, path =>
+                            {
+                                if (path != "/refresh.html") return null;
+                                string name = Interlocked.Increment(ref pages) == 1 ? "stale.mp4" : "fresh.mp4";
+                                return Encoding.UTF8.GetBytes("<html><head><title>Refresh sample</title></head><body><video src=\"" +
+                                    local + "/" + name + "\"></video></body></html>");
+                            }, path =>
+                            {
+                                if (path != "/stale.mp4" && path != "/refused.html") return false;
+                                Interlocked.Increment(ref rejected);
+                                return true;
+                            }, (path, offset) => { if (path == "/fresh.mp4") Interlocked.Exchange(ref resumedAt, offset); });
+                        var messages = new List<string>();
+                        var retryJob = new MediaTask { Source = local + "/refresh.html", Kind = "视频", Folder = o.Downloads };
+                        var recovered = await Engine.Download(o, retryJob, timeout.Token, progress, title => { }, diagnostics: messages.Add);
+                        if (pages != 2 || rejected != 1 || !messages.Any(line => line.Contains("仅重试一次")) ||
+                            !File.ReadAllBytes(recovered.Single()).SequenceEqual(content))
+                            throw new Exception("媒体 403 后未重新解析并保存完整媒体。");
+                        string cache = Path.Combine(Engine.Data, "partial", retryJob.Id);
+                        Directory.CreateDirectory(cache);
+                        string fullOutput = recovered.Single();
+                        int completedBytes = content.Length / 3;
+                        File.WriteAllBytes(Path.Combine(cache, Path.GetFileName(fullOutput) + ".part"), content.Take(completedBytes).ToArray());
+                        File.Delete(fullOutput);
+                        var resumed = await Engine.Download(o, retryJob, timeout.Token, progress, title => { });
+                        if (resumedAt != completedBytes || !File.ReadAllBytes(resumed.Single()).SequenceEqual(content))
+                            throw new Exception("断点续传未使用正确的 Range，或输出文件与原数据不同。");
+                        messages.Clear();
+                        try
+                        {
+                            await Engine.Download(o, new MediaTask {
+                                Source = local + "/refused.html", Kind = "视频", Folder = o.Downloads
+                            }, timeout.Token, progress, title => { }, diagnostics: messages.Add);
+                            throw new Exception("作品页 403 被误判为成功。");
+                        }
+                        catch (InvalidOperationException ex)
+                        {
+                            if (!ex.Message.Contains("403") || rejected != 2 || messages.Any(line => line.Contains("仅重试一次"))) throw;
+                        }
+                    }
+                    finally { recoveryServer.Stop(); }
+                    results.Add("PASS: expired media URL retries once, native resume uses Range, forbidden work page does not retry");
                     o.Aria = true;
                     var aria = await Engine.Download(o, new MediaTask { Source = url, Kind = "视频", Prefix = "aria2 ", Folder = o.Downloads },
                         timeout.Token, progress, title => { });
@@ -217,14 +277,15 @@ namespace TubeGet
             return ServeFiles(server, new Dictionary<string, byte[]> { { "/sample.mp4", content } });
         }
 
-        private static async Task ServeFiles(TcpListener server, Dictionary<string, byte[]> files)
+        private static async Task ServeFiles(TcpListener server, Dictionary<string, byte[]> files,
+            Func<string, byte[]> dynamicFile = null, Func<string, bool> forbidden = null, Action<string, int> resume = null)
         {
             while (true)
             {
                 try
                 {
                     var client = await server.AcceptTcpClientAsync();
-                    StartFixtureResponse(client, files);
+                    StartFixtureResponse(client, files, dynamicFile, forbidden, resume);
                 }
                 catch (ObjectDisposedException) { return; }
                 catch (InvalidOperationException) { return; }
@@ -232,7 +293,8 @@ namespace TubeGet
             }
         }
 
-        private static async void StartFixtureResponse(TcpClient client, Dictionary<string, byte[]> files)
+        private static async void StartFixtureResponse(TcpClient client, Dictionary<string, byte[]> files,
+            Func<string, byte[]> dynamicFile, Func<string, bool> forbidden, Action<string, int> resume)
         {
             try
             {
@@ -243,19 +305,28 @@ namespace TubeGet
                     string first = await reader.ReadLineAsync();
                     if (String.IsNullOrEmpty(first)) return;
                         string header;
-                        while (!String.IsNullOrEmpty(header = await reader.ReadLineAsync())) { }
+                        int requestedStart = 0;
+                        while (!String.IsNullOrEmpty(header = await reader.ReadLineAsync()))
+                            if (header.StartsWith("Range: bytes=", StringComparison.OrdinalIgnoreCase))
+                                Int32.TryParse(header.Substring("Range: bytes=".Length).Split('-')[0], out requestedStart);
                         string[] fields = first.Split(' ');
                         byte[] content;
                         string url = fields.Length > 1 ? fields[1] : "";
-                        bool found = files.TryGetValue(url, out content);
+                        bool denied = forbidden != null && forbidden(url);
+                        if (!files.TryGetValue(url, out content) && dynamicFile != null) content = dynamicFile(url);
+                        bool found = !denied && content != null;
                         if (!found) content = new byte[0];
                         string type = url.EndsWith(".m3u8") ? "application/vnd.apple.mpegurl" :
                             url.EndsWith(".ts") ? "video/mp2t" : url.EndsWith(".html") ? "text/html" :
                             url.EndsWith(".jpg") ? "image/jpeg" : "video/mp4";
-                        byte[] response = Encoding.ASCII.GetBytes("HTTP/1.1 " + (found ? "200 OK" : "404 Not Found") +
-                            "\r\nContent-Type: " + type + "\r\nContent-Length: " + content.Length + "\r\nConnection: close\r\n\r\n");
+                        int start = found && resume != null && requestedStart > 0 && requestedStart < content.Length ? requestedStart : 0;
+                        string range = start == 0 ? "" : "\r\nContent-Range: bytes " + start + "-" + (content.Length - 1) + "/" + content.Length;
+                        if (start != 0) resume(url, start);
+                        string status = start != 0 ? "206 Partial Content" : found ? "200 OK" : denied ? "403 Forbidden" : "404 Not Found";
+                        byte[] response = Encoding.ASCII.GetBytes("HTTP/1.1 " + status + range +
+                            "\r\nContent-Type: " + type + "\r\nContent-Length: " + (content.Length - start) + "\r\nConnection: close\r\n\r\n");
                         await stream.WriteAsync(response, 0, response.Length);
-                        if (fields[0] != "HEAD") await stream.WriteAsync(content, 0, content.Length);
+                        if (fields[0] != "HEAD") await stream.WriteAsync(content, start, content.Length - start);
                 }
             }
             catch (IOException) { }

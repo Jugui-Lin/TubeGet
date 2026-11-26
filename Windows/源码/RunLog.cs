@@ -121,7 +121,11 @@ namespace TubeGet
                     "检查源文件能否正常播放，并核对「转码参数」里的输出格式和编码。";
             }
             if (Regex.IsMatch(detail, @"\b403\b"))
-                return "先确认当前账号能在浏览器播放所选画质，再核对 TubeGet 的登录来源和代理。确认后用原作品链接重新解析。";
+                return Engine.IsXinpianchang(task.Source)
+                    ? "先确认当前账号能在浏览器播放所选画质，核对 TubeGet 的登录来源和代理。更新应用内登录会话后，右键原任务点「开始 / 重试」。"
+                    : "先确认当前账号能在浏览器播放所选画质，再核对 TubeGet 的登录来源和代理。确认后用原作品链接重新解析。";
+            if (!String.IsNullOrEmpty(task.SelectedFormat) && detail.IndexOf("Requested format is not available", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "当前会话未提供此前选择的画质或音轨。请重新解析并确认可用画质后再加入任务。";
             if (Regex.IsMatch(detail, "merg|ffmpeg|ffprobe", RegexOptions.IgnoreCase))
                 return "到「设置 → 组件」检查 FFmpeg 和 FFprobe，再重试任务。";
             return AnalysisAdvice(error, task.Source);

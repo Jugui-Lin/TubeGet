@@ -202,8 +202,10 @@ namespace TubeGet
                 {
                     CancellationTokenSource current;
                     if (!active.TryGetValue(j, out current) || current != cts || IsPausing(j)) return;
-                    j.State = j.Local ? "转换中" : detail == Engine.PostprocessingDetail ? "处理文件" : "下载中";
-                    j.Percent = percent; j.Speed = speed; j.Detail = detail;
+                    j.State = j.Local ? "转换中" : detail == Engine.PostprocessingDetail ? "处理文件" :
+                        detail == Engine.RefreshingDownloadDetail ? "刷新地址" : "下载中";
+                    if (detail != Engine.RefreshingDownloadDetail) j.Percent = percent;
+                    j.Speed = speed; j.Detail = detail;
                 });
                 string[] files = j.Local
                     ? await Engine.ConvertMedia(j, cts.Token, update)
