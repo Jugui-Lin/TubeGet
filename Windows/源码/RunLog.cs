@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Text.RegularExpressions;
@@ -8,16 +8,21 @@ namespace TubeGet
 {
     internal sealed partial class MainForm
     {
-        private readonly Queue<string> runLog = new Queue<string>();
+        private readonly Queue<RunLogEntry> runLog = new Queue<RunLogEntry>();
+        private sealed class RunLogEntry
+        {
+            internal string TaskId;
+            internal string Text;
+        }
         private string doubaoDiagnosis;
         private static readonly Regex LogUrl = new Regex(@"https?://[^\s<>""']+", RegexOptions.IgnoreCase);
 
-        private Action<string> RunDiagnostics(string password)
+        private Action<string> RunDiagnostics(string password, MediaTask task = null)
         {
-            return line => RecordRunLog(line, password);
+            return line => RecordRunLog(line, password, task);
         }
 
-        private void RecordRunLog(string message, string password = null)
+        private void RecordRunLog(string message, string password = null, MediaTask task = null)
         {
             if (String.IsNullOrWhiteSpace(message)) return;
             if (!String.IsNullOrEmpty(password)) message = message.Replace(password, "[视频密码]");
@@ -26,11 +31,20 @@ namespace TubeGet
                 Uri url;
                 return Uri.TryCreate(match.Value, UriKind.Absolute, out url) ? url.Host + "/…" : "[链接]";
             });
+            message = Regex.Replace(message, @"(?im)\b(cookie|set-cookie|authorization|proxy-authorization|x-api-key):[^\r\n]*", "$1: [已隐藏]");
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!String.IsNullOrEmpty(home)) message = Regex.Replace(message, Regex.Escape(home), "%USERPROFILE%", RegexOptions.IgnoreCase);
             if (message.Length > 4096) message = message.Substring(0, 4096) + "…";
             lock (runLog)
             {
                 if (runLog.Count >= 200) runLog.Dequeue();
-                runLog.Enqueue(DateTime.Now.ToString("HH:mm:ss") + "  " + message);
+                string source = "";
+                Uri uri;
+                if (task != null && !task.Local && Uri.TryCreate(task.Source, UriKind.Absolute, out uri)) source = uri.Host + " · ";
+                runLog.Enqueue(new RunLogEntry {
+                    TaskId = task == null ? null : task.Id,
+                    Text = DateTime.Now.ToString("HH:mm:ss") + "  " + source + message
+                });
             }
         }
 
@@ -93,9 +107,31 @@ namespace TubeGet
             }
         }
 
-        private void ShowRunLog()
+        internal static string TaskFailureAdvice(MediaTask task, Exception error)
         {
-            using (var dialog = Dialog("运行日志", 660, 410, new FirstPaintWindow()))
+            string detail = error.Message;
+            if (error is UnauthorizedAccessException || Regex.IsMatch(detail, "access is denied|permission denied|拒绝访问", RegexOptions.IgnoreCase))
+                return "检查输出目录的写入权限，或选择另一个目录后重试。";
+            if (Regex.IsMatch(detail, "no space left|disk full|not enough space|磁盘空间", RegexOptions.IgnoreCase))
+                return "检查目标磁盘的剩余空间，腾出空间后重试。";
+            if (task.Local)
+            {
+                if (!System.IO.File.Exists(task.Source)) return "请重新导入磁盘上仍存在的原文件。";
+                return task.CopyStreams ? "检查目标容器是否支持原始编码，或关闭「无损转换」再试。" :
+                    "检查源文件能否正常播放，并核对「转码参数」里的输出格式和编码。";
+            }
+            if (Regex.IsMatch(detail, @"\b403\b"))
+                return "先确认当前账号能在浏览器播放所选画质，再核对 TubeGet 的登录来源和代理。确认后用原作品链接重新解析。";
+            if (Regex.IsMatch(detail, "merg|ffmpeg|ffprobe", RegexOptions.IgnoreCase))
+                return "到「设置 → 组件」检查 FFmpeg 和 FFprobe，再重试任务。";
+            return AnalysisAdvice(error, task.Source);
+        }
+
+        private void ShowRunLog() { ShowTaskRunLog(null); }
+
+        private void ShowTaskRunLog(MediaTask task)
+        {
+            using (var dialog = Dialog(task == null ? "运行日志" : "任务日志", 660, 410, new FirstPaintWindow()))
             using (var refresh = new Timer { Interval = 350 })
             {
                 var logText = new TextBox {
@@ -108,7 +144,8 @@ namespace TubeGet
                 var footer = Footer();
                 var close = ButtonOf("关闭", 78, () => dialog.Close(), null, null, ButtonStyle.Filled);
                 dialog.CancelButton = close;
-                var copy = ButtonOf("复制日志", 92, () => Copy(logText.Text), null, "clipboard");
+                string latest = "";
+                var copy = ButtonOf("复制日志", 92, () => Copy(latest), null, "clipboard");
                 var ask = ButtonOf("问豆包", 86, () =>
                 {
                     try
@@ -121,29 +158,48 @@ namespace TubeGet
                         MessageBox.Show(dialog, ex.Message, "打开豆包");
                     }
                 }, "复制最近一次解析诊断并打开豆包", null, ButtonStyle.Outlined);
-                ask.Visible = options.AiRepair != null && options.AiRepair.Enabled && options.AiRepair.Provider == "doubao-desktop";
+                ask.Visible = task == null && options.AiRepair != null && options.AiRepair.Enabled && options.AiRepair.Provider == "doubao-desktop";
+                bool follow = true;
                 Action render = () =>
                 {
                     string current;
-                    lock (runLog) current = String.Join(Environment.NewLine, runLog);
+                    lock (runLog)
+                    {
+                        var lines = new List<string>();
+                        foreach (var entry in runLog)
+                            if (task == null || entry.TaskId == task.Id) lines.Add(entry.Text);
+                        current = String.Join(Environment.NewLine, lines);
+                    }
+                    latest = current;
                     copy.Enabled = current.Length > 0;
                     ask.Enabled = doubaoDiagnosis != null;
                     if (current.Length == 0) current = "暂无运行日志";
-                    if (logText.Text == current || (logText.Focused && logText.SelectionLength > 0)) return;
+                    if (!follow || logText.Text == current || (logText.Focused && logText.SelectionLength > 0)) return;
                     logText.Text = current;
                     logText.Select(logText.TextLength, 0);
                     logText.ScrollToCaret();
                 };
+                Button followButton = null;
+                followButton = ButtonOf("暂停滚动", 92, () =>
+                {
+                    follow = !follow;
+                    followButton.Text = follow ? "暂停滚动" : "继续滚动";
+                    if (follow) { logText.Select(logText.TextLength, 0); render(); }
+                }, null, null, ButtonStyle.Outlined);
                 var clear = ButtonOf("清空", 72, () =>
                 {
                     lock (runLog) runLog.Clear();
                     doubaoDiagnosis = null;
+                    follow = true;
+                    followButton.Text = "暂停滚动";
                     logText.Select(0, 0);
                     render();
                 }, null, null, ButtonStyle.Outlined);
                 footer.Controls.Add(close);
                 footer.Controls.Add(copy);
-                footer.Controls.Add(clear);
+                footer.Controls.Add(followButton);
+                if (task == null) footer.Controls.Add(clear);
+                else clear.Dispose();
                 footer.Controls.Add(ask);
                 dialog.Controls.Add(logBody);
                 dialog.Controls.Add(footer);

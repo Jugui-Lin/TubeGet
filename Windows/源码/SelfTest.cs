@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -19,11 +19,12 @@ namespace TubeGet
             var results = new List<string>();
             var o = new Options { Downloads = Path.Combine(root, "下载"), Converted = Path.Combine(root, "转换") };
             var server = new TcpListener(IPAddress.Loopback, 0);
-            using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(100)))
+            using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(180)))
             {
                 try
                 {
                     Directory.CreateDirectory(root);
+                    Engine.UseTestData(Path.Combine(root, "data"));
                     if (Engine.NormalizeBilibiliSpace("https://space.bilibili.com/3985676/dynamic?spm_id_from=333") !=
                         "https://space.bilibili.com/3985676/video?spm_id_from=333" ||
                         Engine.NormalizeBilibiliSpace("https://space.bilibili.com/3985676/lists/22") != "https://space.bilibili.com/3985676/lists/22")
@@ -34,6 +35,20 @@ namespace TubeGet
                         throw new Exception("抖音会话站点识别失败。");
                     var legacy = Engine.Json().Deserialize<Options>("{\"Components\":\"missing\",\"Theme\":\"dark\",\"Parallel\":3}");
                     if (legacy.Theme != "dark" || legacy.Parallel != 3) throw new Exception("旧版设置读取失败。");
+                    string recovery = Path.Combine(root, "recovery.json");
+                    File.WriteAllText(recovery, "{");
+                    File.WriteAllText(recovery + ".bak", "{\"Theme\":\"dotin-dark\",\"ReduceMotion\":true}");
+                    var restored = Engine.ReadWithBackup(recovery, new Options());
+                    if (MainForm.NormalizeTheme(restored.Theme) != "dark" || !restored.ReduceMotion ||
+                        MainForm.NormalizeTheme("dotin-light") != "light" || MainForm.NormalizeTheme("unknown") != "system")
+                        throw new Exception("损坏设置的备份恢复失败。");
+                    foreach (string tag in new[] { "2026.11.25", "v2026.11.25.0", "V2026.11.25.0" })
+                        if (AppUpdater.Select(new ComponentUpdater.Release { tag_name = tag }, new Version("2026.11.25")) != null)
+                            throw new Exception("等效版本号被识别为更新。");
+                    if (!MainForm.TaskFailureAdvice(new MediaTask { Source = "https://example.test/media" },
+                        new IOException("HTTP Error 403: Forbidden")).Contains("所选画质"))
+                        throw new Exception("下载 403 缺少可操作的诊断。");
+                    results.Add("PASS: backup recovery, theme migration, release tag formats and HTTP 403 advice");
                     string js = await Engine.Capture(Engine.JavaScriptRuntime(), new[] { "-e", "console.log(21 * 2)" }, timeout.Token);
                     if (js.Trim() != "42") throw new Exception("QuickJS 自检失败。");
                     results.Add("PASS: bundled QuickJS");
@@ -208,12 +223,25 @@ namespace TubeGet
             {
                 try
                 {
-                    using (var client = await server.AcceptTcpClientAsync())
-                    using (var stream = client.GetStream())
-                    using (var reader = new StreamReader(stream, Encoding.ASCII, false, 4096, true))
-                    {
-                        string first = await reader.ReadLineAsync();
-                        if (String.IsNullOrEmpty(first)) continue;
+                    var client = await server.AcceptTcpClientAsync();
+                    StartFixtureResponse(client, files);
+                }
+                catch (ObjectDisposedException) { return; }
+                catch (InvalidOperationException) { return; }
+                catch (SocketException) { return; }
+            }
+        }
+
+        private static async void StartFixtureResponse(TcpClient client, Dictionary<string, byte[]> files)
+        {
+            try
+            {
+                using (client)
+                using (var stream = client.GetStream())
+                using (var reader = new StreamReader(stream, Encoding.ASCII, false, 4096, true))
+                {
+                    string first = await reader.ReadLineAsync();
+                    if (String.IsNullOrEmpty(first)) return;
                         string header;
                         while (!String.IsNullOrEmpty(header = await reader.ReadLineAsync())) { }
                         string[] fields = first.Split(' ');
@@ -228,13 +256,11 @@ namespace TubeGet
                             "\r\nContent-Type: " + type + "\r\nContent-Length: " + content.Length + "\r\nConnection: close\r\n\r\n");
                         await stream.WriteAsync(response, 0, response.Length);
                         if (fields[0] != "HEAD") await stream.WriteAsync(content, 0, content.Length);
-                    }
                 }
-                catch (ObjectDisposedException) { return; }
-                catch (InvalidOperationException) { return; }
-                catch (SocketException) { return; }
-                catch (IOException) { }
             }
+            catch (IOException) { }
+            catch (ObjectDisposedException) { }
+            catch (SocketException) { }
         }
     }
 }

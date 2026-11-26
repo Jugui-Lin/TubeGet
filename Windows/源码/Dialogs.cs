@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -208,12 +208,15 @@ namespace TubeGet
             var agent = network.Text("User-Agent", options.Agent);
             var referer = network.Text("Referer", options.Referer);
             var aria = network.Check("使用 aria2c 加速下载", options.Aria);
+            var parallelConversions = convert.Select("并行转换数", Enumerable.Range(1, 8).Select(n => n.ToString()).ToArray(),
+                Math.Min(8, Math.Max(1, options.ParallelConversions)).ToString());
             var theme = general.Select("外观模式", ThemeLabels, ThemeLabels[Math.Max(0, Array.IndexOf(ThemeModes, options.Theme))]);
             var components = new TextBox { Text = Engine.ComponentDirectory, ReadOnly = true };
             general.Add("内置组件目录", components, ButtonOf("打开", 68, () => OpenFolder(Engine.ComponentDirectory)));
             var watch = general.Check("监测系统剪贴板", options.Watch);
             var auto = general.Check("新下载任务自动开始", options.AutoStart);
             var resume = general.Check("启动后继续未完成下载", options.Resume);
+            var reduceMotion = general.Check("关闭主题切换动画", options.ReduceMotion);
             var trayMode = general.Check("关闭窗口时最小化到托盘", options.Tray);
             var notify = general.Check("任务完成时显示通知", options.Notify);
             var autoUpdateApp = general.Check("启动时自动检查并下载程序更新", options.AutoUpdateApp);
@@ -244,12 +247,13 @@ namespace TubeGet
                         Downloads = Path.GetFullPath(dest.Text), Converted = Path.GetFullPath(converted.Text),
                         Container = format.Text, Quality = quality.Text,
                         AudioFormat = audio.Text, Parallel = Int32.Parse(parallel.Text, CultureInfo.InvariantCulture), Languages = langs.Text.Trim(),
+                        ParallelConversions = Int32.Parse(parallelConversions.Text, CultureInfo.InvariantCulture),
                         SubtitleFormat = subFormat.Text, Playlist = list.Checked, Cover = cover.Checked,
                         Subtitles = subs.Checked, AutoCaptions = caps.Checked, EmbedSubs = embed.Checked, Metadata = metadata.Checked,
                         Proxy = proxy.Text.Trim(), Rate = rate.Text.Trim(), Cookies = cookies.Text.Trim(), CookieBrowser = CookieSessions.Sources[cookieSource.SelectedIndex],
                         Agent = agent.Text, Referer = referer.Text,
                         Aria = aria.Checked, Watch = watch.Checked, AutoStart = auto.Checked, Resume = resume.Checked,
-                        Tray = trayMode.Checked, Notify = notify.Checked,
+                        Tray = trayMode.Checked, Notify = notify.Checked, ReduceMotion = reduceMotion.Checked,
                         ConvertFormat = defaultConvert.Text, StreamCopy = copyStreams.Checked,
                         Theme = ThemeModes[Array.IndexOf(ThemeLabels, theme.Text)], Transcode = options.Transcode,
                         CompletedCards = options.CompletedCards, CompletedFolderCards = options.CompletedFolderCards,
@@ -421,6 +425,35 @@ namespace TubeGet
                 }
             }
             catch (Exception ex) { MessageBox.Show(this, ex.Message, "无法读取站点列表"); }
+        }
+
+        private async void ShowSourceMedia(MediaTask job)
+        {
+            try
+            {
+                using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12)))
+                {
+                    var data = await Engine.Probe(job.Source, timeout.Token);
+                    if (IsDisposed || quitting) return;
+                    object rawContainer;
+                    var format = data.TryGetValue("format", out rawContainer) ? rawContainer as Dictionary<string, object> : null;
+                    var lines = new List<string> { Path.GetFileName(job.Source) };
+                    if (format != null) lines.Add("容器 " + Engine.Value(format, "format_name"));
+                    foreach (var track in Engine.Rows(data, "streams"))
+                    {
+                        string type = Engine.Value(track, "codec_type"), codec = Engine.Value(track, "codec_name");
+                        if (type == "video") lines.Add("视频 " + codec + " · " + Engine.Value(track, "width") +
+                            " × " + Engine.Value(track, "height") + " · " + Engine.Value(track, "avg_frame_rate") + " fps");
+                        else if (type == "audio") lines.Add("音轨 " + codec + " · " + Engine.Value(track, "channels") + " 声道");
+                        else if (type == "subtitle") lines.Add("字幕 " + codec);
+                    }
+                    MessageBox.Show(this, String.Join(Environment.NewLine, lines), "源媒体信息");
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!IsDisposed && !quitting) MessageBox.Show(this, ex.Message, "无法读取媒体信息");
+            }
         }
 
         private void RenameJob(MediaTask j)

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -28,6 +28,7 @@ namespace TubeGet
         public string Agent { get; set; }
         public string Referer { get; set; }
         public int Parallel { get; set; }
+        public int ParallelConversions { get; set; }
         public bool Watch { get; set; }
         public bool AutoStart { get; set; }
         public bool Resume { get; set; }
@@ -44,6 +45,7 @@ namespace TubeGet
         public bool StreamCopy { get; set; }
         public TranscodePlan Transcode { get; set; }
         public string Theme { get; set; }
+        public bool ReduceMotion { get; set; }
         public bool CompletedCards { get; set; }
         public bool CompletedFolderCards { get; set; }
         public bool AutoUpdateComponents { get; set; }
@@ -56,7 +58,7 @@ namespace TubeGet
             Downloads = Path.Combine(home, "Downloads", "TubeGet Downloaded");
             Converted = Path.Combine(home, "Downloads", "TubeGet Converted");
             Quality = "最佳"; Container = "默认"; AudioFormat = "mp3"; SubtitleFormat = "srt";
-            Languages = "zh.*,en.*"; Parallel = 2; AutoStart = true;
+            Languages = "zh.*,en.*"; Parallel = 2; ParallelConversions = 1; AutoStart = true;
         }
     }
 
@@ -127,7 +129,8 @@ namespace TubeGet
 
     internal static class Engine
     {
-        internal static readonly string Data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TubeGetDesktop");
+        private static string dataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TubeGetDesktop");
+        internal static string Data { get { return dataDirectory; } }
         internal static readonly CultureInfo Invariant = CultureInfo.InvariantCulture;
         internal static JavaScriptSerializer Json()
         {
@@ -136,8 +139,24 @@ namespace TubeGet
 
         internal static T Read<T>(string name, T fallback)
         {
-            try { return Json().Deserialize<T>(File.ReadAllText(Path.Combine(Data, name), Encoding.UTF8)); }
-            catch (Exception) { return fallback; }
+            return ReadWithBackup(Path.Combine(Data, name), fallback);
+        }
+
+        internal static T ReadWithBackup<T>(string path, T fallback)
+        {
+            foreach (string candidate in new[] { path, path + ".bak" })
+            {
+                try
+                {
+                    T result = Json().Deserialize<T>(File.ReadAllText(candidate, Encoding.UTF8));
+                    if ((object)result != null) return result;
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+                catch (ArgumentException) { }
+                catch (InvalidOperationException) { }
+            }
+            return fallback;
         }
 
         internal static void Save<T>(string name, T data)
@@ -151,7 +170,16 @@ namespace TubeGet
 
         internal static readonly string ComponentDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "components");
 
-        internal static readonly ComponentUpdater ComponentUpdates = new ComponentUpdater(Path.Combine(Data, "component-updates"));
+        private static ComponentUpdater componentUpdater = new ComponentUpdater(Path.Combine(Data, "component-updates"));
+        internal static ComponentUpdater ComponentUpdates { get { return componentUpdater; } }
+
+        internal static void UseTestData(string directory)
+        {
+            dataDirectory = directory;
+            componentUpdater = new ComponentUpdater(Path.Combine(directory, "component-updates"));
+        }
+
+        internal const string PostprocessingDetail = "正在合并或处理文件…";
 
         private static string Tool(string relativePath)
         {
@@ -448,6 +476,8 @@ namespace TubeGet
                 if (name.Length > 0) folder = Path.Combine(folder, name);
             }
             Directory.CreateDirectory(folder);
+            Guid taskId;
+            if (!Guid.TryParseExact(job.Id, "N", out taskId)) throw new InvalidDataException("下载任务标识无效。");
             string cache = Path.Combine(Data, "partial", job.Id);
             Directory.CreateDirectory(cache);
             string manifest = Path.Combine(cache, "paths.jsonl");
@@ -501,7 +531,7 @@ namespace TubeGet
             int exit = await Run(Downloader(), args, token, line =>
             {
                 if (line.StartsWith("TT|")) title(line.Substring(3));
-                if (line.StartsWith("TP|")) progress(100, 0, "正在合并或处理文件…");
+                if (line.StartsWith("TP|")) progress(100, 0, PostprocessingDetail);
                 if (!line.StartsWith("TG|")) return;
                 string[] fields = line.Split('|');
                 if (fields.Length < 5) return;

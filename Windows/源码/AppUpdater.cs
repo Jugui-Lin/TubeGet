@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text.RegularExpressions;
+using System.Threading;
 using Microsoft.Win32;
 
 namespace TubeGet
@@ -44,8 +45,13 @@ namespace TubeGet
         {
             Version version;
             string tag = release == null ? "" : release.tag_name ?? "";
-            if (!Regex.IsMatch(tag, @"\Av[0-9]+(?:\.[0-9]+){2,3}\z") || !Version.TryParse(tag.Substring(1), out version))
-                throw new InvalidDataException("无法识别 TubeGet 的发布版本。");
+            if (!Regex.IsMatch(tag, @"\A[vV]?[0-9]+(?:\.[0-9]+){2,3}\z") ||
+                !Version.TryParse(tag.TrimStart('v', 'V'), out version))
+                throw new InvalidDataException("无法识别 TubeGet 的发布版本 " + (tag.Length == 0 ? "（无标签）" : tag) + "。");
+            if (version.Revision < 0 && current.Revision == 0)
+                current = new Version(current.Major, current.Minor, current.Build);
+            else if (current.Revision < 0 && version.Revision == 0)
+                current = new Version(current.Major, current.Minor, current.Build, 0);
             if (version <= current) return null;
             string filename = installed ? "TubeGet-Setup.exe" : "TubeGet.exe";
             var asset = (release.assets ?? new ComponentUpdater.Asset[0]).FirstOrDefault(file => file != null && file.name == filename);
@@ -55,8 +61,10 @@ namespace TubeGet
             return new AppUpdater(tag, version, asset);
         }
 
-        internal string Download(IWebProxy proxy)
+        internal string Download(IWebProxy proxy, Action<long, long> progress = null,
+            CancellationToken cancellation = default(CancellationToken))
         {
+            cancellation.ThrowIfCancellationRequested();
             string directory = Path.Combine(Engine.Data, "app-updates");
             Directory.CreateDirectory(directory);
             string file = Path.Combine(directory, Path.GetFileNameWithoutExtension(asset.name) + "-" + Version +
@@ -74,8 +82,9 @@ namespace TubeGet
                 using (var response = ComponentUpdater.Request(uri, proxy, false))
                 using (var input = response.GetResponseStream())
                 using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                    ComponentUpdater.CopyAsset(input, output, asset.size);
+                    ComponentUpdater.CopyAsset(input, output, asset.size, progress, cancellation);
                 Verify(temporary);
+                cancellation.ThrowIfCancellationRequested();
                 File.Move(temporary, file);
                 return file;
             }

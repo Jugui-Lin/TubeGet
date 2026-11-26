@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -23,13 +23,23 @@ namespace TubeGet
             {
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                foreach (bool dark in new[] { false, true })
+                string captureDirectory = args.Length > 1 ? Path.GetFullPath(args[1]) : null;
+                if (captureDirectory != null) Directory.CreateDirectory(captureDirectory);
+                try
                 {
-                    Material.SetTheme(dark);
-                    using (var form = new MainForm(new string[0], new Options { AutoStart = false }, smokeTest: true))
-                        form.SmokeCheck(args.Length > 1 ? args[1] : null);
+                    foreach (string theme in new[] { "light", "dark" })
+                    {
+                        Material.SetTheme(Material.ResolveDark(theme));
+                        using (var form = new MainForm(new string[0], new Options { AutoStart = false, Theme = theme }, smokeTest: true))
+                            form.SmokeCheck(captureDirectory);
+                    }
+                    return 0;
                 }
-                return 0;
+                catch (Exception ex)
+                {
+                    if (captureDirectory != null) File.WriteAllText(Path.Combine(captureDirectory, "smoke-error.log"), ex.ToString());
+                    return 1;
+                }
             }
             using (var mutex = new Mutex(false, WindowActivation.MutexName))
             {
@@ -46,6 +56,7 @@ namespace TubeGet
                     Application.EnableVisualStyles();
                     Application.SetCompatibleTextRenderingDefault(false);
                     var options = Engine.Read("settings.json", new Options()) ?? new Options();
+                    options.Theme = MainForm.NormalizeTheme(options.Theme);
                     Material.SetTheme(Material.ResolveDark(options.Theme));
                     using (var form = new MainForm(args, options))
                     using (var activation = new WindowActivation(form.ShowMain))
@@ -113,13 +124,23 @@ namespace TubeGet
             this.smokeTest = smokeTest;
             options = saved;
             startupUrls = args;
-            jobs = Engine.Read("tasks.json", new List<MediaTask>()) ?? new List<MediaTask>();
+            jobs = smokeTest ? new List<MediaTask>() : Engine.Read("tasks.json", new List<MediaTask>()).Where(j => j != null).ToList();
+            var taskIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var job in jobs)
+            {
+                Guid identifier;
+                if (Guid.TryParseExact(job.Id, "N", out identifier) && taskIds.Add(job.Id)) continue;
+                job.Id = Guid.NewGuid().ToString("N");
+                taskIds.Add(job.Id);
+                dirty = true;
+            }
             conversionFormat = options.ConvertFormat ?? "mp4";
             streamCopy = options.StreamCopy;
-            foreach (var j in jobs.Where(x => new[] { "解析中", "下载中", "转换中", "等待中" }.Contains(x.State)))
+            foreach (var j in jobs.Where(x => new[] { "解析中", "下载中", "处理文件", "转换中", "等待中", "正在暂停" }.Contains(x.State)))
             {
-                j.State = !j.Local && options.Resume ? "等待中" : "已暂停";
+                j.State = !j.Local && options.Resume && !IsPausing(j) ? "等待中" : "已暂停";
                 j.Speed = 0;
+                dirty = !smokeTest;
             }
             Text = "TubeGet";
             Font = UiFont(10);
@@ -239,7 +260,7 @@ namespace TubeGet
                     if (composerMode != AutoLink || resultMode != TextLinks || choices.Items.Count != 2 ||
                         choices.CheckedItems.Count != 2 || resultCount.Text != "2 项" || preview.Visible ||
                         selectAllCheck.CheckState != CheckState.Checked || !selectAllCheck.Visible ||
-                        pasteComposerButton.Parent.Controls.Count != 1)
+                        analyzeComposerButton.Parent != pasteComposerButton.Parent || !analyzeComposerButton.Visible)
                         throw new InvalidOperationException("批量链接去重或勾选失败。");
                     choices.Items[0].Checked = false;
                     if (selectAllCheck.CheckState != CheckState.Indeterminate)
@@ -304,6 +325,9 @@ namespace TubeGet
                         !choices.Items.Cast<ListViewItem>().SequenceEqual(previousRows) || choices.Items[0].Checked ||
                         !jobs.SequenceEqual(previousQueue) || list.Items.Count != 2)
                         throw new InvalidOperationException("清空链接时影响了解析结果或下载队列。");
+                    SetComposerInput("https://example.test/new-work");
+                    if (!choices.Items.Cast<ListViewItem>().SequenceEqual(previousRows) || !jobs.SequenceEqual(previousQueue))
+                        throw new InvalidOperationException("编辑链接时影响了解析结果或下载队列。");
                     jobs.Clear();
                     RefreshTasks();
                     var channel = Engine.Json().Deserialize<Dictionary<string, object>>(
@@ -313,6 +337,7 @@ namespace TubeGet
                         CollectionUrl(CollectionLeaves(channel).Last()) != "https://www.youtube.com/watch?v=abcdefghijk")
                         throw new InvalidOperationException("嵌套频道列表识别失败。");
                     OpenComposer(AutoLink, "https://example.test/collection");
+                    ResetComposerResult();
                     ConfigureComposerResult(CollectionLinks);
                     analyzedUrl = "https://example.test/collection";
                     channel["title"] = "示例合集";
@@ -537,7 +562,7 @@ namespace TubeGet
             if (list.View != View.Details || options.CompletedFolderCards || !options.CompletedCards ||
                 completedViewButton.Glyph != "grid")
                 throw new InvalidOperationException("合集内切换回列表时影响了首页视图。");
-            bar.Controls.Cast<Control>().OfType<MaterialButton>().Single(button => button.AccessibleName == "返回已完成").PerformClick();
+            bar.Controls.Cast<Control>().OfType<MaterialButton>().Single(button => button.AccessibleName == "返回已完成首页").PerformClick();
             if (list.View != View.LargeIcon || completedFolder != null || filter != "Houdini" || list.Items.Count != 1)
                 throw new InvalidOperationException("返回已完成页后未恢复原视图和搜索结果。");
 
@@ -682,10 +707,32 @@ namespace TubeGet
                 TrayItem("数据文件夹", "folder", () => OpenFolder(Engine.Data)), TrayItem("导出任务", "back", ExportTasks),
                 TrayItem("导入任务", "plus", ImportTasks), new ToolStripSeparator(),
                 TrayItem("支持的站点", "queue", SupportedSites), TrayItem("检查程序更新", "convert", () => CheckAppUpdate(false)),
-                TrayItem("关于 TubeGet", "done", () => MessageBox.Show(this,
-                    "TubeGet " + ReleaseInfo.Version + "\nWindows 视频下载与转换工具\n内置 yt-dlp、FFmpeg、aria2 和 QuickJS", "关于"))
+                TrayItem("关于 TubeGet", "done", ShowAbout)
             });
             return menu;
+        }
+
+        private void ShowAbout()
+        {
+            using (var dialog = Dialog("关于 TubeGet", 460, 300, new FirstPaintWindow()))
+            {
+                string info = "TubeGet " + ReleaseInfo.Version + Environment.NewLine +
+                    "Windows " + (Environment.Is64BitOperatingSystem ? "x64" : "x86") + Environment.NewLine + Environment.NewLine +
+                    String.Join(Environment.NewLine, ComponentUpdater.Components.Select(component =>
+                        component.Name + " " + Engine.ComponentUpdates.InstalledVersion(component)));
+                var details = new TextBox {
+                    Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, BorderStyle = BorderStyle.None,
+                    BackColor = Material.Card, ForeColor = Material.Ink, Text = info, AccessibleName = "TubeGet 版本与组件"
+                };
+                var host = new Panel { Dock = DockStyle.Fill, Padding = new Padding(16), BackColor = Material.Card };
+                host.Controls.Add(details);
+                var footer = Footer();
+                footer.Controls.Add(CloseButton(dialog));
+                footer.Controls.Add(ButtonOf("复制版本信息", 112, () => Copy(info)));
+                dialog.Controls.Add(host);
+                dialog.Controls.Add(footer);
+                ShowAppDialog(dialog, this);
+            }
         }
 
         private void SetPage(int index, bool reloadActions = false)
@@ -795,7 +842,7 @@ namespace TubeGet
             var folder = entry as CompletedFolder;
             if (folder != null)
             {
-                string[] groupCells = { folder.Name, "合集", folder.Count + " 项", "已完成",
+                string[] groupCells = { folder.Name, "合集", CompletedFolderCount(folder), "已完成",
                     folder.Jobs.Max(jobItem => jobItem.Added).ToString("MM-dd HH:mm") };
                 for (int c = 0; c < groupCells.Length; c++)
                     if (row.SubItems[c].Text != groupCells[c]) row.SubItems[c].Text = groupCells[c];
@@ -806,12 +853,17 @@ namespace TubeGet
             var job = file == null ? (MediaTask)entry : file.Job;
             string detail = String.IsNullOrWhiteSpace(job.Detail) ? "" : "  ·  " + job.Detail.Split('\n')[0].Trim();
             string[] cells = { file == null ? job.Title ?? job.Source : Path.GetFileName(file.Path), job.Local ? job.Format : job.Kind, job.Percent.ToString("0.#") + "%",
-                job.State + detail, job.Added.ToString("MM-dd HH:mm") };
+                OutputMissing(job, file == null ? job.File : file.Path) ? "文件缺失" : job.State + detail, job.Added.ToString("MM-dd HH:mm") };
             for (int c = 0; c < cells.Length; c++)
                 if (row.SubItems[c].Text != cells[c]) row.SubItems[c].Text = cells[c];
             string tooltip = file == null ? job.Detail ?? job.File ?? job.Source : file.Path;
             if (row.ToolTipText != tooltip) row.ToolTipText = tooltip;
             if (page == DownloadPage && job.Speed > 0 && list.IsHandleCreated) list.Invalidate(row.Bounds);
+        }
+
+        private static bool OutputMissing(MediaTask job, string output)
+        {
+            return job.State == "已完成" && !String.IsNullOrWhiteSpace(output) && !File.Exists(output);
         }
 
         private static string SizeText(double size)

@@ -2,6 +2,8 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Drawing;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -35,7 +37,8 @@ namespace TubeGet
                     return;
 
                 RecordRunLog("正在下载 TubeGet " + update.Version);
-                string package = await Task.Run(() => update.Download(proxy));
+                string package = automatic ? await Task.Run(() => update.Download(proxy)) :
+                    await DownloadAppUpdateWithProgress(update, proxy);
                 if (IsDisposed || quitting) return;
                 RecordRunLog("TubeGet " + update.Version + " 已下载并通过 SHA-256 校验");
                 if (active.Count > 0 || analysis != null || !Visible || confirmingExit)
@@ -57,6 +60,10 @@ namespace TubeGet
                 }
                 LaunchAppUpdate(package, update.UsesInstaller);
             }
+            catch (OperationCanceledException)
+            {
+                RecordRunLog("已取消程序更新下载");
+            }
             catch (Exception ex)
             {
                 if (IsDisposed || quitting) return;
@@ -64,6 +71,40 @@ namespace TubeGet
                 if (!automatic) MessageBox.Show(this, ex.Message, "程序更新失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             finally { appUpdateRunning = false; }
+        }
+
+        private async Task<string> DownloadAppUpdateWithProgress(AppUpdater update, IWebProxy proxy)
+        {
+            using (var cancellation = new CancellationTokenSource())
+            using (var dialog = Dialog("下载更新", 410, 116))
+            {
+                var detail = new Label {
+                    Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(16, 0, 16, 0),
+                    Text = "正在获取 TubeGet " + update.Version + "…", ForeColor = Material.Ink
+                };
+                var footer = Footer();
+                var cancel = ButtonOf("取消下载", 100, () => dialog.Close());
+                footer.Controls.Add(cancel);
+                dialog.CancelButton = cancel;
+                dialog.Controls.Add(detail);
+                dialog.Controls.Add(footer);
+                dialog.FormClosing += (s, e) => cancellation.Cancel();
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.Show(this);
+                int lastPercent = -1;
+                return await Task.Run(() => update.Download(proxy, (downloaded, total) =>
+                {
+                    int percent = (int)(downloaded * 100 / total);
+                    if (percent == lastPercent) return;
+                    lastPercent = percent;
+                    Post(() =>
+                    {
+                        if (!dialog.IsDisposed)
+                            detail.Text = percent == 100 ? "正在校验更新文件…" : "TubeGet " + update.Version + " · " +
+                                percent + "% · " + SizeText(downloaded) + " / " + SizeText(total);
+                    });
+                }, cancellation.Token));
+            }
         }
 
         private void LaunchAppUpdate(string package, bool useInstaller)

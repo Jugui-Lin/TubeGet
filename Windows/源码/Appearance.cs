@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
@@ -11,13 +11,26 @@ namespace TubeGet
         private static readonly string[] ThemeModes = { "system", "light", "dark" };
         private static readonly string[] ThemeLabels = { "跟随系统", "浅色", "深色" };
 
+        internal static string NormalizeTheme(string mode)
+        {
+            switch (mode)
+            {
+                case "light":
+                case "dotin-light": return "light";
+                case "dark":
+                case "dotin-dark": return "dark";
+                default: return "system";
+            }
+        }
+
         private void ToggleTheme()
         {
             options.Theme = Material.Dark ? "light" : "dark";
             var button = heroActions.Controls.Cast<Control>().OfType<MaterialButton>().FirstOrDefault(x => x.Glyph == "theme");
             Point center = button == null ? new Point(ClientSize.Width / 2, ClientSize.Height / 2) :
                 PointToClient(button.PointToScreen(new Point(button.Width / 2, button.Height / 2)));
-            ThemeTransition.Run(this, center, ApplyTheme);
+            if (options.ReduceMotion) ApplyTheme();
+            else ThemeTransition.Run(this, center, ApplyTheme);
             SaveOptions();
         }
 

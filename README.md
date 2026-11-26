@@ -12,11 +12,19 @@
 
 各版本共用设置和任务历史，存放在 `%LOCALAPPDATA%\TubeGetDesktop`。如果手上只有 GitHub 源码，请先按[构建说明](#构建)准备组件并编译。
 
+| 位置 | 内容 |
+| --- | --- |
+| 安装目录（默认 `%LOCALAPPDATA%\Programs\TubeGet`） | 主程序、内置组件和使用说明 |
+| 数据目录（`⋯ → 数据文件夹`） | 设置、任务记录、登录会话及组件更新缓存 |
+| 输出目录（工作台「保存到」及媒体转换设置） | 下载和转换后的媒体文件 |
+
 ## 解析与下载
+
+**快速开始**：安装并启动 TubeGet → 粘贴作品链接 → 选择画质 → 加入下载队列。
 
 ### 下载单个作品
 
-1. 复制作品页链接，在「下载中」点击「粘贴链接」。手动输入时，按 **Ctrl+Enter** 解析。
+1. 复制作品页链接，在「下载中」点击「粘贴链接」。手动输入时，点「解析」或按 **Ctrl+Enter**。解析期间可点「取消解析」。
 2. 在左侧结果中选择画质，或选择「仅音频」。分轨视频会显示是否自动合并音轨。需要指定音轨、字幕或封面时，打开「附加选项」。
 3. 在「保存到」一栏确认目录，点击「加入下载队列」。任务加入右侧后，可通过「全部开始」和「全部暂停」管理队列，也可以单独暂停或重试任务。
 
@@ -30,7 +38,7 @@
 
 ![合集解析结果，表头可全选，下方可加入下载队列](Windows/images/download-collection.png)
 
-顶部的「清空」只清除链接，保留解析结果和下载队列。左侧结果区的「清空列表」清除解析结果，保留输入链接。
+顶部的「清空」只清除链接，保留解析结果和下载队列。左侧结果区的「清空列表」清除解析结果，保留输入链接。编辑链接时，上一份解析结果仍可查看，点「解析」后刷新。
 
 ## 查看已完成文件
 
@@ -68,24 +76,35 @@
 
 ![参数设置的组件更新页，可查看各组件版本并检查更新](Windows/images/component-updates.png)
 
-「运行日志」窗口可以复制日志。反馈时请附上站点、任务阶段和错误信息，分享前检查是否包含账号信息或私人链接。
+「运行日志」窗口支持复制日志和暂停滚动。右键队列中的任务可打开「查看任务日志」。解析或下载失败后，日志会显示对应的处理建议。反馈时请附上站点、任务阶段和脱敏日志。程序和组件版本可在「⋯ → 关于 TubeGet」复制。
 
 ## 程序更新
 
-打开右上角「⋯ → 检查程序更新」，可从 GitHub 下载较新的稳定版。也可在「设置 → 常规」开启「启动时自动检查并下载程序更新」。下载通过 SHA-256 校验后，可在任务结束后确认安装并重启。程序更新会保留设置和任务历史。便携目录版也可使用此功能，更新后仍从原来的 `TubeGet.exe` 启动。
+打开右上角「⋯ → 检查程序更新」，可从 GitHub 下载较新的稳定版。也可在「设置 → 常规」开启「启动时自动检查并下载程序更新」。下载通过 SHA-256 校验后，可在任务结束后确认安装并重启。程序更新会保留设置和任务历史。手动下载可查看进度或取消。
 
 ## 设置和托盘
 
-- 点击右上角的外观图标切换浅色和深色。在「设置 → 常规 → 外观模式」可以选跟随系统。
+- 点击右上角的外观图标可切换浅色和深色。「设置 → 常规 → 外观模式」支持浅色、深色和跟随系统。也可在常规设置关闭主题切换动画。
 - 开启「关闭窗口时最小化到托盘」后，关窗会隐藏主窗口。右键托盘图标选「显示主窗口」可返回，选「退出 TubeGet」可结束程序。
 - 「设置 → AI 修复」默认关闭。支持 OpenAI API、火山方舟 API、Codex、Ollama 和自定义本地程序。选择服务后先「测试连接」。提供给模型的是用于诊断的站点类型和错误分类等信息。修复后请检查解析结果，再手动加入下载队列。
+
+<details>
+<summary>查看浅色和深色主题</summary>
+
+| 默认浅色 | 默认深色 |
+| --- | --- |
+| ![默认浅色媒体转换界面](Windows/images/theme-light.png) | ![默认深色媒体转换界面](Windows/images/theme-dark.png) |
+
+</details>
 
 组件版本、来源及许可证见[第三方组件清单](Windows/components/第三方组件.md)。截图使用示例任务展示操作位置，实际可选画质和格式以站点返回为准。
 
 ## 构建
 
-按[第三方组件清单](Windows/components/第三方组件.md)准备各组件，将 x64 WebView2 SDK 的 Core、WinForms 和 Loader DLL 放到 `Windows/` 目录。运行 `Windows/源码/build.ps1` 编译，再运行 `Windows/源码/build-single.ps1` 打包。
+按[第三方组件清单](Windows/components/第三方组件.md)准备各组件，将 x64 WebView2 SDK 的 Core、WinForms 和 Loader DLL 放到 `Windows/` 目录。运行 `Windows/源码/build.ps1` 编译。
 
-制作带安装向导的 `TubeGet-Setup.exe` 时，运行 `Windows/源码/build-installer.ps1`。用 `-ProgramDirectory` 指定编译后的 `Windows` 程序目录，用 `-Compiler` 指定 Inno Setup 的 `ISCC.exe`，可用 `-OutputDirectory` 指定输出位置。如果编译器的 `Languages` 目录里缺少 `ChineseSimplified.isl`，可从 [Inno Setup 官方翻译页面](https://jrsoftware.org/inno-setup/translations)下载简体中文文件。
+制作带安装向导的 `TubeGet-Setup.exe` 时，运行 `Windows/源码/build-installer.ps1`。用 `-ProgramDirectory` 指定编译后的 `Windows` 程序目录，用 `-Compiler` 指定 Inno Setup 的 `ISCC.exe`，可用 `-OutputDirectory` 指定输出位置。添加 `-Verify` 可在打包前运行功能自测与界面检查，保存日志和截图，打包后核对版本并生成 `SHA256SUMS.txt`。如果编译器的 `Languages` 目录里缺少 `ChineseSimplified.isl`，可从 [Inno Setup 官方翻译页面](https://jrsoftware.org/inno-setup/translations)下载简体中文文件。
+
+发布前核对发布标签、安装包和 EXE 的版本，验证全新安装及覆盖升级，确认 GitHub 发布页包含 `TubeGet-Setup.exe`，再从上一个已安装版本验证更新入口。对涉及的站点和画质，在发布说明写明实测范围。
 
 [浏览 Windows 源码](Windows/源码)

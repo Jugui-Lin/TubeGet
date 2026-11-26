@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -267,17 +267,23 @@ namespace TubeGet
             throw new InvalidDataException("GitHub 更新地址重定向次数过多。");
         }
 
-        internal static void CopyAsset(Stream input, Stream output, long expected)
+        internal static void CopyAsset(Stream input, Stream output, long expected, Action<long, long> progress = null,
+            System.Threading.CancellationToken cancellation = default(System.Threading.CancellationToken))
         {
             var buffer = new byte[128 * 1024];
             long total = 0;
             int read;
-            while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+            while (true)
             {
+                cancellation.ThrowIfCancellationRequested();
+                read = input.Read(buffer, 0, buffer.Length);
+                if (read == 0) break;
                 total += read;
                 if (total > expected) throw new InvalidDataException("下载文件大小校验失败。");
                 output.Write(buffer, 0, read);
+                if (progress != null) progress(total, expected);
             }
+            cancellation.ThrowIfCancellationRequested();
             if (total != expected) throw new InvalidDataException("下载文件不完整。");
         }
 

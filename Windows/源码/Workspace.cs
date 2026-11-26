@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
@@ -203,7 +203,7 @@ namespace TubeGet
             {
                 AddHeaderAction("打开下载目录", "folder", () => OpenFolder(completedFolder ?? options.Downloads));
                 if (completedFolder != null)
-                    bar.Controls.Add(ButtonOf("返回", 80, () => NavigateCompletedFolder(null), "返回已完成", "back", ButtonStyle.Outlined));
+                    bar.Controls.Add(ButtonOf("已完成", 86, () => NavigateCompletedFolder(null), "返回已完成首页", "back", ButtonStyle.Outlined));
                 var searchBox = new Panel { Width = 254, Height = 36, BackColor = Material.Container, Margin = new Padding(0, 0, 10, 0) };
                 searchBox.Paint += (s, e) => Material.Icon(e.Graphics, "search", new Rectangle(10, 8, 18, 18), Material.Muted);
                 var search = new TextBox {
@@ -357,7 +357,7 @@ namespace TubeGet
                 var row = list.GetItemAt(e.X, e.Y);
                 var job = row == null ? null : row.Tag as MediaTask;
                 if (job == null || !QueueActionBounds(row.Bounds).Contains(e.Location)) return;
-                if (active.ContainsKey(job)) PauseJobs(new[] { job });
+                if (active.ContainsKey(job) && !IsPausing(job)) PauseJobs(new[] { job });
                 else ResumeJobs(new[] { job });
             };
             empty.MouseUp += (s, e) => { if (e.Button == MouseButtons.Right) ShowMenu(TaskMenu(), empty, e.Location); };
@@ -367,6 +367,11 @@ namespace TubeGet
             };
             list.ColumnClick += (s, e) =>
             {
+                if (page == 1)
+                {
+                    SortCompleted(e.Column);
+                    return;
+                }
                 jobs.Sort((a, b) =>
                 {
                     switch (e.Column)
@@ -453,15 +458,16 @@ namespace TubeGet
             }
             else if (e.ColumnIndex == 3)
             {
-                bool error = job.State == "失败", complete = job.State == "已完成";
+                bool missing = e.SubItem.Text == "文件缺失";
+                bool error = job.State == "失败" || missing, complete = job.State == "已完成" && !missing;
                 bool running = job.State == "解析中" || job.State == "下载中" || job.State == "转换中";
                 Color fill = error ? Material.ErrorContainer : complete ? Material.SuccessContainer :
                     running && !e.Item.Selected ? Material.Accent : Material.Container;
                 Color ink = error ? Material.Error : complete ? Material.Success : running ? Material.OnAccent : Material.Muted;
-                int chipWidth = TextRenderer.MeasureText(job.State, Font).Width + 15;
+                int chipWidth = TextRenderer.MeasureText(missing ? e.SubItem.Text : job.State, Font).Width + 15;
                 var chip = new Rectangle(content.X, bounds.Top + (bounds.Height - Ui(24)) / 2, chipWidth, Ui(24));
                 Material.Fill(g, chip, 12, fill);
-                TextRenderer.DrawText(g, job.State, Font, chip, ink, text | TextFormatFlags.HorizontalCenter);
+                TextRenderer.DrawText(g, missing ? e.SubItem.Text : job.State, Font, chip, ink, text | TextFormatFlags.HorizontalCenter);
                 if (job.Speed > 0)
                     TextRenderer.DrawText(g, SizeText(job.Speed) + "/s", Font,
                         new Rectangle(chip.Right + 6, bounds.Top, Math.Max(1, content.Right - chip.Right - 6), bounds.Height), Material.Muted, text);
@@ -483,7 +489,7 @@ namespace TubeGet
             using (var line = new Pen(Material.Line)) g.DrawLine(line, bounds.Left, bounds.Bottom - 1, bounds.Right, bounds.Bottom - 1);
 
             var action = QueueActionBounds(bounds);
-            bool running = job.State == "下载中" || job.State == "解析中";
+            bool running = active.ContainsKey(job) && !IsPausing(job);
             Material.Fill(g, action, 9, Material.Container);
             Material.Icon(g, running ? "pause" : "play",
                 new Rectangle(action.Left + 8, action.Top + 8, 18, 18), Material.Primary);
@@ -510,8 +516,9 @@ namespace TubeGet
         {
             if (page == DownloadPage)
             {
-                int downloading = shown.Count(j => j.State == "下载中" || j.State == "解析中");
-                downloadQueueCount.Text = shown.Length + " 项";
+                int downloading = shown.Count(j => j.State == "下载中" || j.State == "解析中" || j.State == "处理文件");
+                double totalSpeed = shown.Where(j => j.State == "下载中").Sum(j => j.Speed);
+                downloadQueueCount.Text = shown.Length + " 项" + (totalSpeed > 0 ? " · " + SizeText(totalSpeed) + "/s" : "");
                 downloadStatus.Text = downloading + " 项下载中";
                 count.Text = "";
                 status.Text = "输出目录  ·  " + options.Downloads;
@@ -529,7 +536,7 @@ namespace TubeGet
             list.Visible = rowCount > 0;
             empty.Visible = rowCount == 0;
             count.Text = rowCount + " 项";
-            int running = shown.Count(j => active.ContainsKey(j) && j.State != "已暂停");
+            int running = shown.Count(j => active.ContainsKey(j) && j.State != "已暂停" && !IsPausing(j));
             int failed = shown.Count(j => j.State == "失败");
             int complete = shown.Count(j => j.State == "已完成");
             status.Text = "输出目录  ·  " + (page == 2 ? options.Converted : completedFolder ?? options.Downloads);

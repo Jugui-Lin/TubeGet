@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -11,6 +11,8 @@ namespace TubeGet
 {
     internal sealed partial class MainForm
     {
+        private bool scheduling;
+        private readonly HashSet<MediaTask> resumeAfterPause = new HashSet<MediaTask>();
         private readonly Dictionary<string, string> videoPasswords = new Dictionary<string, string>();
 
         private static string ClipboardText()
@@ -128,18 +130,35 @@ namespace TubeGet
 
         private void ResumeJobs(IEnumerable<MediaTask> items)
         {
-            foreach (var j in items.Where(j => j.State != "已完成" && !active.ContainsKey(j)))
-            { j.State = "等待中"; j.Detail = null; }
+            foreach (var j in items.Where(j => j.State != "已完成"))
+            {
+                if (active.ContainsKey(j))
+                {
+                    if (IsPausing(j)) resumeAfterPause.Add(j);
+                    continue;
+                }
+                j.State = "等待中"; j.Detail = null;
+            }
             Changed(); Schedule();
         }
+
+        private static bool IsPausing(MediaTask task) { return task.State == "正在暂停"; }
 
         private void PauseJobs(IEnumerable<MediaTask> items)
         {
             foreach (var j in items.Where(j => j.State == "等待中" || active.ContainsKey(j)))
             {
-                j.State = "已暂停"; j.Speed = 0;
+                resumeAfterPause.Remove(j);
+                j.Speed = 0;
                 CancellationTokenSource cts;
-                if (active.TryGetValue(j, out cts)) ThreadPool.QueueUserWorkItem(_ =>
+                if (!active.TryGetValue(j, out cts))
+                {
+                    j.State = "已暂停";
+                    continue;
+                }
+                if (IsPausing(j)) continue;
+                j.State = "正在暂停";
+                ThreadPool.QueueUserWorkItem(_ =>
                 {
                     try { cts.Cancel(); } catch (ObjectDisposedException) { }
                 });
@@ -149,9 +168,20 @@ namespace TubeGet
 
         private void Schedule()
         {
-            if (quitting) return;
-            int slots = Math.Max(1, Math.Min(8, options.Parallel)) - active.Count;
-            foreach (var j in jobs.Where(j => j.State == "等待中" && !active.ContainsKey(j)).Take(Math.Max(0, slots)).ToArray()) RunJob(j);
+            if (quitting || scheduling) return;
+            scheduling = true;
+            try
+            {
+                int downloads = Math.Max(1, Math.Min(8, options.Parallel));
+                int conversions = Math.Max(1, Math.Min(8, options.ParallelConversions));
+                foreach (var job in jobs.Where(j => j.State == "等待中").ToArray())
+                {
+                    if (active.ContainsKey(job)) continue;
+                    int running = active.Keys.Count(task => task.Local == job.Local);
+                    if (running < (job.Local ? conversions : downloads)) RunJob(job);
+                }
+            }
+            finally { scheduling = false; }
         }
 
         private async void RunJob(MediaTask j)
@@ -165,45 +195,52 @@ namespace TubeGet
             string password;
             videoPasswords.TryGetValue(j.Id, out password);
             string operation = j.Local ? "媒体处理" : "下载";
-            RecordRunLog("开始" + operation);
+            RecordRunLog("开始" + operation, task: j);
             try
             {
                 Action<double, double, string> update = (percent, speed, detail) => Post(() =>
                 {
-                    if (!active.ContainsKey(j) || j.State == "已暂停") return;
-                    j.State = j.Local ? "转换中" : "下载中";
+                    CancellationTokenSource current;
+                    if (!active.TryGetValue(j, out current) || current != cts || IsPausing(j)) return;
+                    j.State = j.Local ? "转换中" : detail == Engine.PostprocessingDetail ? "处理文件" : "下载中";
                     j.Percent = percent; j.Speed = speed; j.Detail = detail;
                 });
                 string[] files = j.Local
                     ? await Engine.ConvertMedia(j, cts.Token, update)
                     : await Engine.Download(snapshot, j, cts.Token, update, title => Post(() =>
                     {
-                        if (!active.ContainsKey(j) || j.State == "已暂停") return;
+                        CancellationTokenSource current;
+                        if (!active.TryGetValue(j, out current) || current != cts || IsPausing(j)) return;
                         if (!j.Playlist) j.Title = title;
                         if (j.State == "解析中") j.State = "下载中";
-                    }), password, RunDiagnostics(password));
+                    }), password, RunDiagnostics(password, j));
                 videoPasswords.Remove(j.Id);
                 j.File = files[0]; j.Files = files;
                 if (j.Title == j.Source || j.Playlist)
                     j.Title = Path.GetFileNameWithoutExtension(j.File) + (files.Length > 1 ? " 等 " + files.Length + " 个文件" : "");
                 j.State = "已完成"; j.Percent = 100; j.Detail = null;
-                RecordRunLog(operation + "完成");
+                RecordRunLog(operation + "完成", task: j);
                 if (options.Notify && !quitting) tray.ShowBalloonTip(2500, "任务完成", j.Title, ToolTipIcon.Info);
             }
             catch (OperationCanceledException)
             {
                 j.State = "已暂停"; j.Detail = null;
-                RecordRunLog(operation + "已暂停");
+                RecordRunLog(operation + "已暂停", task: j);
             }
             catch (Exception ex)
             {
                 j.State = "失败"; j.Detail = String.IsNullOrEmpty(password) ? ex.Message : ex.Message.Replace(password, "[视频密码]");
-                RecordRunLog(operation + "失败 · " + ex.Message, password);
+                string advice = TaskFailureAdvice(j, ex);
+                RecordRunLog(operation + "失败 · " + ex.Message, password, j);
+                RecordRunLog("处理建议 · " + advice, password, j);
+                j.Detail += Environment.NewLine + advice;
             }
             finally
             {
                 j.Speed = 0;
                 active.Remove(j);
+                if (resumeAfterPause.Remove(j) && !quitting && jobs.Contains(j) && j.State == "已暂停")
+                    j.State = "等待中";
                 cts.Dispose();
                 Changed();
                 Schedule();
@@ -236,6 +273,7 @@ namespace TubeGet
         private void Changed() { dirty = true; RefreshTasks(); }
         private void Persist()
         {
+            if (smokeTest) return;
             try { Engine.Save("tasks.json", jobs); dirty = false; }
             catch (Exception ex)
             {
@@ -310,19 +348,28 @@ namespace TubeGet
                 Item("打开磁盘文件夹", () => OpenFolder(Path.GetDirectoryName(file.Path))));
             var selection = Selected(); var j = selection.FirstOrDefault();
             if (j == null) return BuildMenu(Item("打开输出文件夹", () => OpenFolder(page == 2 ? options.Converted : options.Downloads)),
+                Item("重试所有失败任务", () => ResumeJobs(VisibleJobs().Where(x => x.State == "失败").ToArray())),
                 Item("清除失败任务", () => DeleteJobs(VisibleJobs().Where(x => x.State == "失败").ToArray())));
             var items = new List<ToolStripItem>();
             if (j.State != "已完成")
             {
                 items.Add(Item("开始 / 重试", () => ResumeJobs(selection)));
+                if (selection.Any(x => x.State == "失败"))
+                    items.Add(Item("重试所选失败任务", () => ResumeJobs(selection.Where(x => x.State == "失败"))));
                 items.Add(Item("暂停", () => PauseJobs(selection)));
                 items.Add(Item("任务详情", () => MessageBox.Show(this, j.Detail ?? j.Source, j.State)));
+                items.Add(Item("查看任务日志", () => ShowTaskRunLog(j)));
                 if (j.State == "等待中")
-                    items.Add(Item("移到队首", () => { jobs.Remove(j); jobs.Insert(0, j); Changed(); Schedule(); }));
+                {
+                    items.Add(Item("移到队首", () => MoveWaitingJob(j, 0)));
+                    items.Add(Item("上移", () => MoveWaitingJob(j, -1)));
+                    items.Add(Item("下移", () => MoveWaitingJob(j, 1)));
+                }
             }
             if (j.Local || j.State == "已完成")
             {
                 items.Add(Item("播放 / 打开文件", () => OpenTask(j)));
+                if (j.Local && File.Exists(j.Source)) items.Add(Item("查看源媒体信息", () => ShowSourceMedia(j)));
                 items.Add(Item("打开文件夹", () => OpenFolder(j.File != null ? Path.GetDirectoryName(j.File) : j.Folder)));
                 if (j.State == "已完成" && !j.Local)
                 {
@@ -347,6 +394,19 @@ namespace TubeGet
             items.Add(Item("删除任务", () => DeleteJobs(selection)));
             items.Add(Item("清空当前列表", () => DeleteJobs(VisibleJobs().ToArray())));
             return BuildMenu(items.ToArray());
+        }
+
+        private void MoveWaitingJob(MediaTask job, int direction)
+        {
+            var waiting = jobs.Where(item => item.Local == job.Local && item.State == "等待中").ToArray();
+            int index = Array.IndexOf(waiting, job);
+            int target = direction == 0 ? 0 : index + direction;
+            if (index < 0 || target < 0 || target >= waiting.Length || index == target) return;
+            int position = jobs.IndexOf(waiting[target]);
+            jobs.Remove(job);
+            jobs.Insert(position, job);
+            Changed();
+            Schedule();
         }
 
         private bool Copy(string value)
@@ -404,17 +464,39 @@ namespace TubeGet
                 try
                 {
                     var imported = Engine.Json().Deserialize<List<MediaTask>>(File.ReadAllText(dlg.FileName));
-                    foreach (var old in imported.Where(j => j != null && (j.Local ? File.Exists(j.Source) : Urls(j.Source).Contains(j.Source))))
+                    if (imported == null) throw new InvalidDataException("文件没有可读取的任务列表。");
+                    var accepted = new List<MediaTask>();
+                    int invalid = 0, duplicates = 0;
+                    foreach (var old in imported)
                     {
-                        if (jobs.Any(j => j.Source == old.Source && j.Kind == old.Kind && j.Playlist == old.Playlist)) continue;
-                        jobs.Add(new MediaTask {
+                        if (old == null || !(old.Local ? File.Exists(old.Source) : Urls(old.Source).Contains(old.Source)))
+                        {
+                            invalid++;
+                            continue;
+                        }
+                        string kind = old.Local ? "转换" : new[] { "视频", "音频", "封面", "字幕", "字幕与封面" }.Contains(old.Kind) ? old.Kind : "视频";
+                        if (jobs.Concat(accepted).Any(j => j.Source == old.Source && j.Kind == kind && j.Playlist == old.Playlist))
+                        {
+                            duplicates++;
+                            continue;
+                        }
+                        accepted.Add(new MediaTask {
                             Source = old.Source, Title = old.Title,
-                            Kind = old.Local ? "转换" : new[] { "视频", "音频", "封面", "字幕", "字幕与封面" }.Contains(old.Kind) ? old.Kind : "视频",
+                            Kind = kind,
                             Playlist = old.Playlist, Folder = old.Local ? options.Converted : options.Downloads,
                             Format = ConversionFormats.Contains(old.Format) ? old.Format : "mp4",
                             CopyStreams = old.CopyStreams, State = "已暂停"
                         });
                     }
+                    string summary = "可导入 " + accepted.Count + " 项 · 重复 " + duplicates + " 项 · 无效 " + invalid + " 项";
+                    if (accepted.Count == 0)
+                    {
+                        MessageBox.Show(this, summary, "导入任务");
+                        return;
+                    }
+                    if (MessageBox.Show(this, summary + "\n导入后以暂停状态加入队列。", "确认导入",
+                        MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return;
+                    jobs.AddRange(accepted);
                     Changed(); Persist();
                 }
                 catch (Exception ex) { MessageBox.Show(this, ex.Message, "导入失败"); }

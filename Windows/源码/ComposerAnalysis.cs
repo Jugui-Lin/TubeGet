@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -47,6 +47,7 @@ namespace TubeGet
             string password = composerPassword;
             var request = new CancellationTokenSource();
             analysis = request;
+            SetAnalysisButtonState(true);
             int generation = analysisGeneration;
             clearListButton.Enabled = true;
             choiceStatus.Text = "正在解析…";
@@ -72,6 +73,7 @@ namespace TubeGet
                 if (mode == AutoLink) mode = Engine.IsCollectionResult(info) ? CollectionLinks : SingleLink;
                 ConfigureComposerResult(mode);
                 analyzedUrl = inspection.Url;
+                resultPassword = password;
                 var title = Engine.Value(info, "title");
                 string imageUrl = Engine.ThumbnailUrl(info);
                 if (mode == CollectionLinks)
@@ -139,7 +141,11 @@ namespace TubeGet
                 if (analysis == request)
                 {
                     analysis = null;
-                    if (!IsDisposed) clearListButton.Enabled = analyzedUrl != null || choices.Items.Count > 0;
+                    if (!IsDisposed)
+                    {
+                        SetAnalysisButtonState(false);
+                        clearListButton.Enabled = analyzedUrl != null || choices.Items.Count > 0;
+                    }
                 }
                 request.Dispose();
             }
@@ -373,7 +379,7 @@ namespace TubeGet
                     bool subtitle = !String.IsNullOrEmpty(plan.Languages);
                     if (!subtitle && !coverPicker.Checked) return;
                     string kind = subtitle ? (coverPicker.Checked ? "字幕与封面" : "字幕") : "封面";
-                    ReportQueued(AddUrls(analyzedUrl, kind, false, null, 0, false, plan, folder, composerPassword));
+                    ReportQueued(AddUrls(analyzedUrl, kind, false, null, 0, false, plan, folder, resultPassword));
                     return;
                 }
                 if (resultMode == TextLinks || resultMode == CollectionLinks)
@@ -392,7 +398,7 @@ namespace TubeGet
                 if (selected == null) return;
                 string audio = audioIds[audioPicker.SelectedIndex];
                 string format = selected.NeedsAudio ? selected.Format + (audio == null ? "+ba/" + selected.Format : "+" + audio) : selected.Format;
-                ReportQueued(AddUrls(analyzedUrl, selected.HasVideo ? "视频" : "音频", false, format, 0, false, plan, folder, composerPassword));
+                ReportQueued(AddUrls(analyzedUrl, selected.HasVideo ? "视频" : "音频", false, format, 0, false, plan, folder, resultPassword));
             }
             catch (Exception ex) { choiceStatus.Text = SafeComposerError(ex); }
         }

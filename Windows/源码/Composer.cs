@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -46,7 +46,8 @@ namespace TubeGet
         private bool updatingRows, clearingComposerInput;
         private string clearedComposerInput;
         private int analysisGeneration;
-        private string composerCookies, composerCookieBrowser, composerPassword, analyzedUrl, collectionDirectoryName, collectionCoverUrl;
+        private string composerCookies, composerCookieBrowser, composerPassword, resultPassword, analyzedUrl, collectionDirectoryName, collectionCoverUrl;
+        private MaterialButton analyzeComposerButton;
         private string[] audioIds = new string[] { null };
         private string[] subtitleIds = new string[] { null };
         private bool[] automaticSubtitles = new[] { false };
@@ -94,8 +95,10 @@ namespace TubeGet
 
             pasteComposerButton = ButtonOf("粘贴链接", 119, () => PasteComposerInput(ClipboardText()),
                 "粘贴链接并解析", "clipboard", ButtonStyle.Filled);
+            analyzeComposerButton = (MaterialButton)ButtonOf("解析", 74, AnalyzeComposer,
+                "解析输入框中的链接（Ctrl+Enter）", null, ButtonStyle.Outlined);
             clearComposerButton = ButtonOf("清空", 52, ClearComposerInput,
-                "清空链接输入框", null, ButtonStyle.Quiet);
+                "仅清空链接输入框，保留解析结果和下载队列", null, ButtonStyle.Quiet);
             clearComposerButton.Enabled = false;
             links.Multiline = true;
             links.ScrollBars = ScrollBars.None;
@@ -109,7 +112,13 @@ namespace TubeGet
                 clearComposerButton.Enabled = links.TextLength > 0;
                 if (clearingComposerInput) return;
                 composerPassword = null;
-                ResetComposerResult();
+                if (analyzedUrl != null) choiceStatus.Text = "保留上次解析结果 · 点「解析」处理当前链接";
+                else if (analysis != null)
+                {
+                    CancelComposerAnalysis();
+                    UpdateComposerSelection();
+                    choiceStatus.Text = "链接已更改 · 点「解析」处理当前链接";
+                }
             };
             links.KeyDown += (s, e) =>
             {
@@ -133,10 +142,12 @@ namespace TubeGet
             inputWell.Controls.Add(clearSlot);
 
             var actions = new FlowLayoutPanel {
-                Dock = DockStyle.Right, Width = pasteComposerButton.Width + 7,
+                Dock = DockStyle.Right, Width = pasteComposerButton.Width + analyzeComposerButton.Width + 13,
                 Padding = new Padding(7, 5, 0, 0), WrapContents = false, BackColor = Material.LinkCard, TabIndex = 1
             };
             pasteComposerButton.Margin = Padding.Empty;
+            analyzeComposerButton.Margin = new Padding(0, 0, 6, 0);
+            actions.Controls.Add(analyzeComposerButton);
             actions.Controls.Add(pasteComposerButton);
             inputRegion.Controls.Add(inputWell);
             inputRegion.Controls.Add(actions);
@@ -492,7 +503,8 @@ namespace TubeGet
                 return;
             }
             SetComposerInput(input);
-            if (analysis == null) AnalyzeComposer();
+            CancelComposerAnalysis();
+            AnalyzeComposer();
         }
 
         private void SetComposerRowHeight(Control row, int height)
@@ -508,10 +520,18 @@ namespace TubeGet
             var pending = analysis;
             if (pending == null) return;
             analysis = null;
+            if (!Disposing && !analyzeComposerButton.IsDisposed) SetAnalysisButtonState(false);
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 try { pending.Cancel(); } catch (ObjectDisposedException) { }
             });
+        }
+
+        private void SetAnalysisButtonState(bool running)
+        {
+            analyzeComposerButton.Text = running ? "取消解析" : "解析";
+            analyzeComposerButton.AccessibleName = analyzeComposerButton.Text;
+            tips.SetToolTip(analyzeComposerButton, running ? "取消当前解析" : "解析输入框中的链接（Ctrl+Enter）");
         }
 
         private void ResetComposerResult(string status = null)
@@ -525,6 +545,7 @@ namespace TubeGet
                     // Hide the native list before changing its rows and checkbox style.
                     choices.Hide();
                     clearedComposerInput = null;
+                    resultPassword = null;
                     analyzedUrl = collectionDirectoryName = collectionCoverUrl = null;
                     formatSizeColumnWidth = 0;
                     ClearCollectionPreviews();
@@ -784,7 +805,7 @@ namespace TubeGet
 
         private string SafeComposerError(Exception error)
         {
-            return String.IsNullOrEmpty(composerPassword) ? error.Message : error.Message.Replace(composerPassword, "[视频密码]");
+            return String.IsNullOrEmpty(resultPassword) ? error.Message : error.Message.Replace(resultPassword, "[视频密码]");
         }
 
         private static string DurationText(string input)

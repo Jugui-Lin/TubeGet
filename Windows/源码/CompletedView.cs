@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -116,7 +116,7 @@ namespace TubeGet
             var text = TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter;
             TextRenderer.DrawText(g, e.Item.Text, Font,
                 new Rectangle(cover.X, cover.Bottom + Ui(3), cover.Width, Ui(19)), Material.Ink, text);
-            TextRenderer.DrawText(g, folder == null ? job.Kind + "  ·  " + job.Added.ToString("MM-dd HH:mm") : "合集  ·  " + folder.Count + " 项", Font,
+            TextRenderer.DrawText(g, folder == null ? job.Kind + "  ·  " + (OutputMissing(job, file == null ? job.File : file.Path) ? "文件缺失" : job.Added.ToString("MM-dd HH:mm")) : "合集  ·  " + CompletedFolderCount(folder), Font,
                 new Rectangle(cover.X, cover.Bottom + Ui(22), cover.Width, Ui(16)), Material.Muted, text);
         }
 

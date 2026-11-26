@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -12,6 +12,8 @@ namespace TubeGet
     {
         private string completedFolder;
         private string completedRootFilter = "";
+        private int completedSortColumn = -1;
+        private bool completedSortDescending;
 
         private sealed class CompletedFolder
         {
@@ -128,7 +130,7 @@ namespace TubeGet
                         }
                         else
                         {
-                            var files = PlaylistFiles(job).Where(path => MatchesTaskFilter(Path.GetFileName(path)))
+                            var files = PlaylistFiles(job).Where(path => MatchesTaskFilter(Path.GetFileName(path)) || MatchesTaskFilter(job.Title))
                                 .Select(path => new CompletedFile { Job = job, Path = path }).ToArray();
                             if (files.Length == 0) continue;
                             rows.AddRange(files);
@@ -152,7 +154,7 @@ namespace TubeGet
                     }
                     if (!added.Add(path)) continue;
                     var folder = groups[path];
-                    if (!MatchesTaskFilter(folder.Name) && !folder.Jobs.Any(member => MatchesTaskFilter(member.Title ?? member.Source)))
+                    if (!MatchesTaskFilter(folder.Name) && MatchingFolderCount(folder) == 0)
                         continue;
                     rows.Add(folder);
                     matchingJobs.AddRange(folder.Jobs);
@@ -160,7 +162,59 @@ namespace TubeGet
             }
 
             visible = matchingJobs.ToArray();
+            if (completedSortColumn == 0 || completedSortColumn == 1)
+            {
+                var ordered = rows.OrderBy(row => CompletedSortText(row), StringComparer.CurrentCultureIgnoreCase);
+                return (completedSortDescending ? ordered.Reverse() : ordered).ToArray();
+            }
+            if (completedSortColumn == 4)
+            {
+                var ordered = rows.OrderBy(CompletedAdded);
+                return (completedSortDescending ? ordered.Reverse() : ordered).ToArray();
+            }
             return rows.ToArray();
+        }
+
+        private void SortCompleted(int column)
+        {
+            if (column != 0 && column != 1 && column != 4) return;
+            completedSortDescending = completedSortColumn == column ? !completedSortDescending : column == 4;
+            completedSortColumn = column;
+            RefreshTasks();
+        }
+
+        private string CompletedSortText(object row)
+        {
+            var folder = row as CompletedFolder;
+            var file = row as CompletedFile;
+            if (folder != null) return completedSortColumn == 0 ? folder.Name : "合集";
+            var job = file == null ? (MediaTask)row : file.Job;
+            if (completedSortColumn == 1) return job.Kind;
+            return file == null ? job.Title ?? job.Source : Path.GetFileName(file.Path);
+        }
+
+        private static DateTime CompletedAdded(object row)
+        {
+            var folder = row as CompletedFolder;
+            var file = row as CompletedFile;
+            if (folder != null) return folder.Jobs.Max(job => job.Added);
+            return (file == null ? (MediaTask)row : file.Job).Added;
+        }
+
+        private int MatchingFolderCount(CompletedFolder folder)
+        {
+            return folder.Jobs.Sum(job =>
+            {
+                if (!job.Playlist) return MatchesTaskFilter(job.Title ?? job.Source) ? 1 : 0;
+                return MatchesTaskFilter(job.Title ?? job.Source) ? Math.Max(1, PlaylistFiles(job).Count()) :
+                    PlaylistFiles(job).Count(path => MatchesTaskFilter(Path.GetFileName(path)));
+            });
+        }
+
+        private string CompletedFolderCount(CompletedFolder folder)
+        {
+            if (filter.Length == 0 || MatchesTaskFilter(folder.Name)) return folder.Count + " 项";
+            return "匹配 " + MatchingFolderCount(folder) + " / " + folder.Count + " 项";
         }
 
         private bool MatchesTaskFilter(string text)
